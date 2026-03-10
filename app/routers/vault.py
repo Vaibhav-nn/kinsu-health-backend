@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -27,7 +28,7 @@ router = APIRouter()
 
 @router.get("/records", response_model=RecordListResponse)
 async def get_records(
-    record_type: str | None = None,
+    record_type: Optional[str] = None,
     page: int = 1,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
