@@ -64,3 +64,10 @@ class FileUploadResponse(BaseModel):
     message: str
     file_url: str
     file_size: int
+
+
+class RecordListResponse(BaseModel):
+    records: list[RecordResponse]
+    total: int
+    page: int
+    limit: int

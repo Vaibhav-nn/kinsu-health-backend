@@ -15,12 +15,46 @@ from app.schemas.vault import (
     PresignedUploadRequest,
     PresignedUploadResponse,
     RecordCreateBatch,
+    RecordListResponse,
+    RecordResponse,
     UploadRecordsResponse,
 )
 from app.services.s3 import s3_service
 from app.services.storage import storage_service
 
 router = APIRouter()
+
+
+@router.get("/records", response_model=RecordListResponse)
+async def get_records(
+    record_type: str | None = None,
+    page: int = 1,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+) -> RecordListResponse:
+    offset = (page - 1) * limit
+    
+    query = select(HealthRecord).order_by(HealthRecord.record_date.desc())
+    
+    if record_type:
+        query = query.where(HealthRecord.record_type == record_type)
+    
+    count_query = select(HealthRecord)
+    if record_type:
+        count_query = count_query.where(HealthRecord.record_type == record_type)
+    
+    result = await db.execute(query.offset(offset).limit(limit))
+    records = result.scalars().all()
+    
+    count_result = await db.execute(count_query)
+    total = len(count_result.scalars().all())
+    
+    return RecordListResponse(
+        records=[RecordResponse.model_validate(r) for r in records],
+        total=total,
+        page=page,
+        limit=limit,
+    )
 
 
 @router.post("/records", response_model=UploadRecordsResponse)
