@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "230843545606",
+    "project_id": "kinsu-health-d5be6",
+    "storage_bucket": "kinsu-health-d5be6.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:230843545606:android:1b4feae8aba31398f96b87",
+        "android_client_info": {
+          "package_name": "com.health_lab.kinsu"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAc9ISJSDlbK27CtLCoxbgIAR2y96Qy54c"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

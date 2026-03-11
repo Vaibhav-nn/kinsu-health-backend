@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 
 /// Dio [Interceptor] that automatically attaches the current Firebase
 /// user's ID token to every outgoing request.
@@ -18,15 +19,31 @@ class FirebaseAuthInterceptor extends Interceptor {
     try {
       final user = FirebaseAuth.instance.currentUser;
 
-      if (user != null) {
-        // Force-refresh if the token is about to expire
-        final idToken = await user.getIdToken(true);
-        options.headers['Authorization'] = 'Bearer $idToken';
+      if (user == null) {
+        debugPrint('⚠️ FirebaseAuthInterceptor: no signed-in Firebase user.');
+        handler.next(options);
+        return;
       }
-    } catch (e) {
+
+      // Prefer cached token first. Force-refresh only as fallback.
+      String? idToken = await user.getIdToken();
+      idToken ??= await user.getIdToken(true);
+
+      if (idToken != null && idToken.isNotEmpty) {
+        debugPrint('FIREBASE_ID_TOKEN: $idToken');
+        options.headers['Authorization'] = 'Bearer $idToken';
+      } else {
+        debugPrint('⚠️ FirebaseAuthInterceptor: token fetch returned empty.');
+      }
+    } on FirebaseAuthException catch (e) {
       // If token fetch fails, let the request proceed without the token.
       // The backend will return 401 and the app can handle re-auth.
-      print('⚠️ FirebaseAuthInterceptor: failed to get ID token — $e');
+      debugPrint(
+        '⚠️ FirebaseAuthInterceptor: FirebaseAuthException '
+        '${e.code} — ${e.message}',
+      );
+    } catch (e) {
+      debugPrint('⚠️ FirebaseAuthInterceptor: failed to get ID token — $e');
     }
 
     handler.next(options);

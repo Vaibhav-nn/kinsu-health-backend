@@ -19,6 +19,7 @@ class Settings(BaseSettings):
 
     # ── CORS ──────────────────────────────────────────────
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:8080"
+    CORS_ORIGIN_REGEX: str = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
 
     # ── API ───────────────────────────────────────────────
     API_V1_PREFIX: str = "/api/v1"
