@@ -3,8 +3,17 @@
 from datetime import date, datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 
@@ -13,6 +22,9 @@ class ChronicSymptom(Base):
     """A chronic or recurring symptom being tracked by the user."""
 
     __tablename__ = "chronic_symptoms"
+    __table_args__ = (
+        CheckConstraint("severity BETWEEN 1 AND 10", name="ck_chronic_symptoms_severity_range"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(
@@ -51,6 +63,9 @@ class ChronicSymptom(Base):
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+
+    # ── Relationship ──────────────────────────────────────
+    user: Mapped["User"] = relationship("User", back_populates="chronic_symptoms")
 
     def __repr__(self) -> str:
         return f"<ChronicSymptom(id={self.id}, name='{self.symptom_name}')>"

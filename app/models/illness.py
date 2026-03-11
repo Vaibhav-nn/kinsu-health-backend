@@ -9,6 +9,7 @@ from datetime import date, datetime, timezone
 from typing import Optional
 
 from sqlalchemy import (
+    CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
@@ -25,6 +26,12 @@ class IllnessEpisode(Base):
     """A distinct illness occurrence with start/end dates and status."""
 
     __tablename__ = "illness_episodes"
+    __table_args__ = (
+        CheckConstraint(
+            "end_date IS NULL OR end_date >= start_date",
+            name="ck_illness_episodes_valid_date_range",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(
@@ -56,6 +63,7 @@ class IllnessEpisode(Base):
     )
 
     # ── Relationship ──────────────────────────────────────
+    user: Mapped["User"] = relationship("User", back_populates="illness_episodes")
     details: Mapped[list["IllnessDetail"]] = relationship(
         "IllnessDetail",
         back_populates="episode",

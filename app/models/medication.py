@@ -3,8 +3,17 @@
 from datetime import date, datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 
@@ -13,6 +22,12 @@ class Medication(Base):
     """A medication entry with dosage, frequency, and prescribing info."""
 
     __tablename__ = "medications"
+    __table_args__ = (
+        CheckConstraint(
+            "end_date IS NULL OR end_date >= start_date",
+            name="ck_medications_valid_date_range",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(
@@ -52,6 +67,14 @@ class Medication(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
+    )
+
+    # ── Relationships ─────────────────────────────────────
+    user: Mapped["User"] = relationship("User", back_populates="medications")
+    reminders: Mapped[list["Reminder"]] = relationship(
+        "Reminder",
+        back_populates="medication",
+        passive_deletes=True,
     )
 
     def __repr__(self) -> str:

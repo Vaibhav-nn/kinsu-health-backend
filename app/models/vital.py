@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 
@@ -41,6 +41,9 @@ class VitalLog(Base):
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+
+    # ── Relationship ──────────────────────────────────────
+    user: Mapped["User"] = relationship("User", back_populates="vital_logs")
 
     def __repr__(self) -> str:
         return f"<VitalLog(id={self.id}, type='{self.vital_type}', value={self.value})>"

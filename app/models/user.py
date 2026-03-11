@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import DateTime, Integer, String
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 
@@ -35,6 +35,44 @@ class User(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
+    )
+
+    # ── Relationships ─────────────────────────────────────
+    vital_logs: Mapped[list["VitalLog"]] = relationship(
+        "VitalLog",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    chronic_symptoms: Mapped[list["ChronicSymptom"]] = relationship(
+        "ChronicSymptom",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    illness_episodes: Mapped[list["IllnessEpisode"]] = relationship(
+        "IllnessEpisode",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    medications: Mapped[list["Medication"]] = relationship(
+        "Medication",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    reminders: Mapped[list["Reminder"]] = relationship(
+        "Reminder",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    home_preference: Mapped[Optional["HomePreference"]] = relationship(
+        "HomePreference",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+    home_notifications: Mapped[list["HomeNotification"]] = relationship(
+        "HomeNotification",
+        back_populates="user",
+        cascade="all, delete-orphan",
     )
 
     def __repr__(self) -> str:
