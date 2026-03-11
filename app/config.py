@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "Kinsu Health API"
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/kinsu_health"
+    database_url: str = "postgresql+asyncpg://vatiwari@localhost:5432/kinsu_health"
     base_url: str = "http://localhost:8000"
     
     storage_backend: str = "local"
