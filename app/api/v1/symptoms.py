@@ -2,9 +2,10 @@
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
+from app.api.v1._utils import get_user_owned_or_404, model_list
 from app.api.deps import get_current_user
 from app.core.database import get_db
 from app.models.symptom import ChronicSymptom
@@ -43,7 +44,7 @@ async def list_symptoms(
         query = query.filter(ChronicSymptom.is_active == is_active)
 
     symptoms = query.order_by(ChronicSymptom.created_at.desc()).offset(offset).limit(limit).all()
-    return [SymptomResponse.model_validate(s) for s in symptoms]
+    return model_list(symptoms, SymptomResponse)
 
 
 @router.get("/{symptom_id}", response_model=SymptomResponse)
@@ -53,14 +54,13 @@ async def get_symptom(
     db: Session = Depends(get_db),
 ) -> SymptomResponse:
     """Get a single chronic symptom by ID."""
-    symptom = db.query(ChronicSymptom).filter(
-        ChronicSymptom.id == symptom_id,
-        ChronicSymptom.user_id == user.id,
-    ).first()
-
-    if not symptom:
-        raise HTTPException(status_code=404, detail="Symptom not found.")
-
+    symptom = get_user_owned_or_404(
+        db,
+        ChronicSymptom,
+        item_id=symptom_id,
+        user_id=user.id,
+        not_found_detail="Symptom not found.",
+    )
     return SymptomResponse.model_validate(symptom)
 
 
@@ -72,13 +72,13 @@ async def update_symptom(
     db: Session = Depends(get_db),
 ) -> SymptomResponse:
     """Update a chronic symptom (partial update)."""
-    symptom = db.query(ChronicSymptom).filter(
-        ChronicSymptom.id == symptom_id,
-        ChronicSymptom.user_id == user.id,
-    ).first()
-
-    if not symptom:
-        raise HTTPException(status_code=404, detail="Symptom not found.")
+    symptom = get_user_owned_or_404(
+        db,
+        ChronicSymptom,
+        item_id=symptom_id,
+        user_id=user.id,
+        not_found_detail="Symptom not found.",
+    )
 
     update_data = payload.model_dump(exclude_unset=True)
     for field, value in update_data.items():
@@ -96,13 +96,12 @@ async def delete_symptom(
     db: Session = Depends(get_db),
 ) -> None:
     """Delete a chronic symptom."""
-    symptom = db.query(ChronicSymptom).filter(
-        ChronicSymptom.id == symptom_id,
-        ChronicSymptom.user_id == user.id,
-    ).first()
-
-    if not symptom:
-        raise HTTPException(status_code=404, detail="Symptom not found.")
-
+    symptom = get_user_owned_or_404(
+        db,
+        ChronicSymptom,
+        item_id=symptom_id,
+        user_id=user.id,
+        not_found_detail="Symptom not found.",
+    )
     db.delete(symptom)
     db.commit()

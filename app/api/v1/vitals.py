@@ -3,10 +3,10 @@
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
+from app.api.v1._utils import get_user_owned_or_404, model_list
 from app.api.deps import get_current_user
 from app.core.database import get_db
 from app.models.user import User
@@ -56,7 +56,7 @@ async def list_vitals(
         query = query.filter(VitalLog.recorded_at <= end_date)
 
     vitals = query.order_by(VitalLog.recorded_at.desc()).offset(offset).limit(limit).all()
-    return [VitalLogResponse.model_validate(v) for v in vitals]
+    return model_list(vitals, VitalLogResponse)
 
 
 @router.get("/trends", response_model=VitalTrendResponse)
@@ -117,14 +117,13 @@ async def get_vital(
     db: Session = Depends(get_db),
 ) -> VitalLogResponse:
     """Get a single vital reading by ID."""
-    vital = db.query(VitalLog).filter(
-        VitalLog.id == vital_id,
-        VitalLog.user_id == user.id,
-    ).first()
-
-    if not vital:
-        raise HTTPException(status_code=404, detail="Vital log not found.")
-
+    vital = get_user_owned_or_404(
+        db,
+        VitalLog,
+        item_id=vital_id,
+        user_id=user.id,
+        not_found_detail="Vital log not found.",
+    )
     return VitalLogResponse.model_validate(vital)
 
 
@@ -135,13 +134,12 @@ async def delete_vital(
     db: Session = Depends(get_db),
 ) -> None:
     """Delete a vital reading."""
-    vital = db.query(VitalLog).filter(
-        VitalLog.id == vital_id,
-        VitalLog.user_id == user.id,
-    ).first()
-
-    if not vital:
-        raise HTTPException(status_code=404, detail="Vital log not found.")
-
+    vital = get_user_owned_or_404(
+        db,
+        VitalLog,
+        item_id=vital_id,
+        user_id=user.id,
+        not_found_detail="Vital log not found.",
+    )
     db.delete(vital)
     db.commit()

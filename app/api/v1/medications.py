@@ -2,9 +2,10 @@
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
+from app.api.v1._utils import get_user_owned_or_404, model_list
 from app.api.deps import get_current_user
 from app.core.database import get_db
 from app.models.medication import Medication
@@ -43,7 +44,7 @@ async def list_medications(
         query = query.filter(Medication.is_active == is_active)
 
     meds = query.order_by(Medication.created_at.desc()).offset(offset).limit(limit).all()
-    return [MedicationResponse.model_validate(m) for m in meds]
+    return model_list(meds, MedicationResponse)
 
 
 @router.get("/{medication_id}", response_model=MedicationResponse)
@@ -53,14 +54,13 @@ async def get_medication(
     db: Session = Depends(get_db),
 ) -> MedicationResponse:
     """Get a single medication by ID."""
-    med = db.query(Medication).filter(
-        Medication.id == medication_id,
-        Medication.user_id == user.id,
-    ).first()
-
-    if not med:
-        raise HTTPException(status_code=404, detail="Medication not found.")
-
+    med = get_user_owned_or_404(
+        db,
+        Medication,
+        item_id=medication_id,
+        user_id=user.id,
+        not_found_detail="Medication not found.",
+    )
     return MedicationResponse.model_validate(med)
 
 
@@ -72,13 +72,13 @@ async def update_medication(
     db: Session = Depends(get_db),
 ) -> MedicationResponse:
     """Update a medication (partial update)."""
-    med = db.query(Medication).filter(
-        Medication.id == medication_id,
-        Medication.user_id == user.id,
-    ).first()
-
-    if not med:
-        raise HTTPException(status_code=404, detail="Medication not found.")
+    med = get_user_owned_or_404(
+        db,
+        Medication,
+        item_id=medication_id,
+        user_id=user.id,
+        not_found_detail="Medication not found.",
+    )
 
     update_data = payload.model_dump(exclude_unset=True)
     for field, value in update_data.items():
@@ -96,13 +96,12 @@ async def delete_medication(
     db: Session = Depends(get_db),
 ) -> None:
     """Delete a medication."""
-    med = db.query(Medication).filter(
-        Medication.id == medication_id,
-        Medication.user_id == user.id,
-    ).first()
-
-    if not med:
-        raise HTTPException(status_code=404, detail="Medication not found.")
-
+    med = get_user_owned_or_404(
+        db,
+        Medication,
+        item_id=medication_id,
+        user_id=user.id,
+        not_found_detail="Medication not found.",
+    )
     db.delete(med)
     db.commit()

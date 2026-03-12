@@ -13,6 +13,7 @@ from firebase_admin import auth as firebase_auth
 
 from app.core.database import get_db
 from app.models.user import User
+from app.api.user_sync import upsert_user_from_decoded_token
 
 
 async def verify_firebase_token(
@@ -76,17 +77,15 @@ async def get_current_user(
     Returns:
         The ``User`` ORM object for the authenticated user.
 
-    Raises:
-        HTTPException 404: If the user has not completed login (no DB record).
+    Notes:
+        The user is auto-upserted on first authenticated request.
     """
-    firebase_uid: str = decoded_token.get("uid", "")
-
-    user = db.query(User).filter(User.firebase_uid == firebase_uid).first()
-
-    if user is None:
+    try:
+        user, _created = upsert_user_from_decoded_token(db, decoded_token)
+    except ValueError:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found. Please call POST /api/v1/auth/login first.",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Firebase token payload is missing required user identity.",
         )
 
     return user

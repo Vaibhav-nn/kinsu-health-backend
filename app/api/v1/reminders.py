@@ -1,11 +1,11 @@
 """Reminders endpoints — CRUD operations and timeline view."""
 
-from datetime import date, time
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
+from app.api.v1._utils import get_user_owned_or_404, model_list
 from app.api.deps import get_current_user
 from app.core.database import get_db
 from app.models.reminder import Reminder
@@ -47,7 +47,7 @@ async def list_reminders(
         query = query.filter(Reminder.is_enabled == is_enabled)
 
     reminders = query.order_by(Reminder.scheduled_time.asc()).offset(offset).limit(limit).all()
-    return [ReminderResponse.model_validate(r) for r in reminders]
+    return model_list(reminders, ReminderResponse)
 
 
 @router.get("/timeline", response_model=list[ReminderResponse])
@@ -60,12 +60,12 @@ async def reminder_timeline(
         db.query(Reminder)
         .filter(
             Reminder.user_id == user.id,
-            Reminder.is_enabled == True,
+            Reminder.is_enabled.is_(True),
         )
         .order_by(Reminder.scheduled_time.asc())
         .all()
     )
-    return [ReminderResponse.model_validate(r) for r in reminders]
+    return model_list(reminders, ReminderResponse)
 
 
 @router.get("/{reminder_id}", response_model=ReminderResponse)
@@ -75,14 +75,13 @@ async def get_reminder(
     db: Session = Depends(get_db),
 ) -> ReminderResponse:
     """Get a single reminder by ID."""
-    reminder = db.query(Reminder).filter(
-        Reminder.id == reminder_id,
-        Reminder.user_id == user.id,
-    ).first()
-
-    if not reminder:
-        raise HTTPException(status_code=404, detail="Reminder not found.")
-
+    reminder = get_user_owned_or_404(
+        db,
+        Reminder,
+        item_id=reminder_id,
+        user_id=user.id,
+        not_found_detail="Reminder not found.",
+    )
     return ReminderResponse.model_validate(reminder)
 
 
@@ -94,13 +93,13 @@ async def update_reminder(
     db: Session = Depends(get_db),
 ) -> ReminderResponse:
     """Update a reminder (partial update)."""
-    reminder = db.query(Reminder).filter(
-        Reminder.id == reminder_id,
-        Reminder.user_id == user.id,
-    ).first()
-
-    if not reminder:
-        raise HTTPException(status_code=404, detail="Reminder not found.")
+    reminder = get_user_owned_or_404(
+        db,
+        Reminder,
+        item_id=reminder_id,
+        user_id=user.id,
+        not_found_detail="Reminder not found.",
+    )
 
     update_data = payload.model_dump(exclude_unset=True)
     for field, value in update_data.items():
@@ -118,13 +117,12 @@ async def delete_reminder(
     db: Session = Depends(get_db),
 ) -> None:
     """Delete a reminder."""
-    reminder = db.query(Reminder).filter(
-        Reminder.id == reminder_id,
-        Reminder.user_id == user.id,
-    ).first()
-
-    if not reminder:
-        raise HTTPException(status_code=404, detail="Reminder not found.")
-
+    reminder = get_user_owned_or_404(
+        db,
+        Reminder,
+        item_id=reminder_id,
+        user_id=user.id,
+        not_found_detail="Reminder not found.",
+    )
     db.delete(reminder)
     db.commit()
