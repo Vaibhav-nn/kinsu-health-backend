@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -127,9 +127,39 @@ async def download_file(record_id: str, filename: str):
             raise HTTPException(status_code=404, detail="File not found")
         
         file_path = storage_service.storage_dir / relative_path
-        return FileResponse(path=file_path, filename=filename)
+        
+        # Determine media type
+        media_type = "application/pdf" if filename.lower().endswith('.pdf') else None
+        
+        # Create FileResponse with inline disposition (preview, not download)
+        response = FileResponse(
+            path=file_path,
+            media_type=media_type,
+        )
+        
+        # Set Content-Disposition to inline to show in browser, not download
+        response.headers["Content-Disposition"] = f'inline; filename="{filename}"'
+        
+        # Add CORS headers
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        
+        return response
     else:
         raise HTTPException(status_code=501, detail="Direct file download not supported with S3. Use presigned download URL.")
+
+
+@router.options("/files/{record_id}/{filename}")
+async def download_file_options(record_id: str, filename: str):
+    """Handle CORS preflight for file downloads"""
+    return Response(
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
 
 
 @router.post("/records/upload-url", response_model=PresignedUploadResponse)
