@@ -1,5 +1,35 @@
+# ── Python ────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+venv/
+.venv/
+env/
+
+# ── Environment & Secrets ────────────────────────────────
+.env
+*.env
+firebase-service-account.json
+*.json.bak
+
+# ── Database ──────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+
+# ── IDE ───────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
 .venv/*
 __pycache__/*
 .env
 *.pyc
 uploads/*
+mockups/*
