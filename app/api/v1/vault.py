@@ -6,8 +6,10 @@ from fastapi.responses import FileResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_current_user
 from app.core.config import settings
 from app.core.database import get_db
+from app.models.user import User
 from app.models.vault import HealthRecord
 from app.schemas.vault import (
     FileUploadConfirmation,
@@ -34,21 +36,22 @@ async def get_records(
     record_type: Optional[str] = None,
     page: int = 1,
     limit: int = 50,
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> RecordListResponse:
     logger.debug(
         "Fetching health records",
-        extra={"extra_fields": {"record_type": record_type, "page": page, "limit": limit}},
+        extra={"extra_fields": {"record_type": record_type, "page": page, "limit": limit, "user_id": user.id}},
     )
     
     offset = (page - 1) * limit
     
-    query = select(HealthRecord).order_by(HealthRecord.record_date.desc())
+    query = select(HealthRecord).where(HealthRecord.user_id == user.id).order_by(HealthRecord.record_date.desc())
     
     if record_type:
         query = query.where(HealthRecord.record_type == record_type)
     
-    count_query = select(HealthRecord)
+    count_query = select(HealthRecord).where(HealthRecord.user_id == user.id)
     if record_type:
         count_query = count_query.where(HealthRecord.record_type == record_type)
     
@@ -60,7 +63,7 @@ async def get_records(
     
     logger.info(
         "Health records retrieved",
-        extra={"extra_fields": {"count": len(records), "total": total, "page": page}},
+        extra={"extra_fields": {"count": len(records), "total": total, "page": page, "user_id": user.id}},
     )
     
     return RecordListResponse(
@@ -74,15 +77,17 @@ async def get_records(
 @router.post("/records", response_model=UploadRecordsResponse)
 async def upload_records(
     body: RecordCreateBatch,
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> UploadRecordsResponse:
     logger.info(
         "Creating health records",
-        extra={"extra_fields": {"count": len(body.records)}},
+        extra={"extra_fields": {"count": len(body.records), "user_id": user.id}},
     )
     
     records = [
         HealthRecord(
+            user_id=user.id,
             record_type=r.record_type,
             record_date=r.record_date,
             title=r.title,
@@ -96,7 +101,7 @@ async def upload_records(
     
     logger.info(
         "Health records created successfully",
-        extra={"extra_fields": {"count": len(ids)}},
+        extra={"extra_fields": {"count": len(ids), "user_id": user.id}},
     )
     
     return UploadRecordsResponse(created=len(ids), record_ids=ids)
@@ -104,8 +109,9 @@ async def upload_records(
 
 @router.post("/records/{record_id}/upload", response_model=FileUploadResponse)
 async def upload_file_direct(
-    record_id: str,
+    record_id: int,
     file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> FileUploadResponse:
     logger.info(
@@ -115,23 +121,30 @@ async def upload_file_direct(
                 "record_id": record_id,
                 "filename": file.filename,
                 "content_type": file.content_type,
+                "user_id": user.id,
             }
         },
     )
     
     result = await db.execute(
-        select(HealthRecord).where(HealthRecord.id == record_id)
+        select(HealthRecord).where(
+            HealthRecord.id == record_id,
+            HealthRecord.user_id == user.id
+        )
     )
     record = result.scalar_one_or_none()
     
     if not record:
-        logger.warning("Health record not found for upload", extra={"extra_fields": {"record_id": record_id}})
+        logger.warning(
+            "Health record not found for upload", 
+            extra={"extra_fields": {"record_id": record_id, "user_id": user.id}}
+        )
         raise HTTPException(status_code=404, detail="Health record not found")
     
     if settings.STORAGE_BACKEND == "local":
         upload_info = storage_service.generate_upload_path(
             file_name=file.filename,
-            record_id=record_id,
+            record_id=str(record_id),
         )
         
         content = await file.read()
@@ -151,6 +164,7 @@ async def upload_file_direct(
                     "record_id": record_id,
                     "filename": file.filename,
                     "file_size": file_size,
+                    "user_id": user.id,
                 }
             },
         )
@@ -166,11 +180,32 @@ async def upload_file_direct(
 
 
 @router.get("/files/{record_id}/{filename}")
-async def download_file(record_id: str, filename: str):
+async def download_file(
+    record_id: int,
+    filename: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     logger.debug(
         "File download requested",
-        extra={"extra_fields": {"record_id": record_id, "filename": filename}},
+        extra={"extra_fields": {"record_id": record_id, "filename": filename, "user_id": user.id}},
     )
+    
+    # Verify the record belongs to the user
+    result = await db.execute(
+        select(HealthRecord).where(
+            HealthRecord.id == record_id,
+            HealthRecord.user_id == user.id
+        )
+    )
+    record = result.scalar_one_or_none()
+    
+    if not record:
+        logger.warning(
+            "Health record not found or unauthorized",
+            extra={"extra_fields": {"record_id": record_id, "user_id": user.id}},
+        )
+        raise HTTPException(status_code=404, detail="Health record not found")
     
     if settings.STORAGE_BACKEND == "local":
         relative_path = f"{record_id}/{filename}"
@@ -203,7 +238,7 @@ async def download_file(record_id: str, filename: str):
         
         logger.info(
             "File served successfully",
-            extra={"extra_fields": {"record_id": record_id, "filename": filename}},
+            extra={"extra_fields": {"record_id": record_id, "filename": filename, "user_id": user.id}},
         )
         
         return response
@@ -226,6 +261,7 @@ async def download_file_options(record_id: str, filename: str):
 @router.post("/records/upload-url", response_model=PresignedUploadResponse)
 async def get_upload_url(
     body: PresignedUploadRequest,
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> PresignedUploadResponse:
     if settings.STORAGE_BACKEND == "local":
@@ -238,19 +274,26 @@ async def get_upload_url(
         "Generating presigned upload URL",
         extra={
             "extra_fields": {
-                "record_id": str(body.record_id),
+                "record_id": body.record_id,
                 "filename": body.file_name,
+                "user_id": user.id,
             }
         },
     )
     
     result = await db.execute(
-        select(HealthRecord).where(HealthRecord.id == body.record_id)
+        select(HealthRecord).where(
+            HealthRecord.id == body.record_id,
+            HealthRecord.user_id == user.id
+        )
     )
     record = result.scalar_one_or_none()
     
     if not record:
-        logger.warning("Health record not found for presigned URL", extra={"extra_fields": {"record_id": str(body.record_id)}})
+        logger.warning(
+            "Health record not found for presigned URL", 
+            extra={"extra_fields": {"record_id": body.record_id, "user_id": user.id}}
+        )
         raise HTTPException(status_code=404, detail="Health record not found")
     
     try:
@@ -262,7 +305,7 @@ async def get_upload_url(
         
         logger.info(
             "Presigned upload URL generated",
-            extra={"extra_fields": {"record_id": str(body.record_id), "s3_key": presigned_data["s3_key"]}},
+            extra={"extra_fields": {"record_id": body.record_id, "s3_key": presigned_data["s3_key"], "user_id": user.id}},
         )
         
         return PresignedUploadResponse(
@@ -273,7 +316,7 @@ async def get_upload_url(
     except Exception as e:
         logger.exception(
             "Failed to generate presigned upload URL",
-            extra={"extra_fields": {"record_id": str(body.record_id), "error": str(e)}},
+            extra={"extra_fields": {"record_id": body.record_id, "error": str(e)}},
         )
         raise HTTPException(status_code=500, detail=f"Failed to generate upload URL: {str(e)}")
 
@@ -281,6 +324,7 @@ async def get_upload_url(
 @router.post("/records/confirm-upload", response_model=FileUploadConfirmationResponse)
 async def confirm_file_upload(
     body: FileUploadConfirmation,
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> FileUploadConfirmationResponse:
     if settings.STORAGE_BACKEND == "local":
@@ -293,25 +337,32 @@ async def confirm_file_upload(
         "Confirming file upload",
         extra={
             "extra_fields": {
-                "record_id": str(body.record_id),
+                "record_id": body.record_id,
                 "s3_key": body.s3_key,
+                "user_id": user.id,
             }
         },
     )
     
     result = await db.execute(
-        select(HealthRecord).where(HealthRecord.id == body.record_id)
+        select(HealthRecord).where(
+            HealthRecord.id == body.record_id,
+            HealthRecord.user_id == user.id
+        )
     )
     record = result.scalar_one_or_none()
     
     if not record:
-        logger.warning("Health record not found for upload confirmation", extra={"extra_fields": {"record_id": str(body.record_id)}})
+        logger.warning(
+            "Health record not found for upload confirmation", 
+            extra={"extra_fields": {"record_id": body.record_id, "user_id": user.id}}
+        )
         raise HTTPException(status_code=404, detail="Health record not found")
     
     if not s3_service.verify_file_exists(body.s3_key):
         logger.error(
             "File not found in S3 after upload",
-            extra={"extra_fields": {"s3_key": body.s3_key, "record_id": str(body.record_id)}},
+            extra={"extra_fields": {"s3_key": body.s3_key, "record_id": body.record_id}},
         )
         raise HTTPException(status_code=400, detail="File not found in S3")
     
@@ -336,9 +387,10 @@ async def confirm_file_upload(
         "File upload confirmed and metadata saved",
         extra={
             "extra_fields": {
-                "record_id": str(body.record_id),
+                "record_id": body.record_id,
                 "file_size": file_size,
                 "s3_key": body.s3_key,
+                "user_id": user.id,
             }
         },
     )

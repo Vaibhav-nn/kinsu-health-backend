@@ -1,5 +1,5 @@
 import uuid
-from typing import Dict
+from typing import Dict, Union
 
 import boto3
 from botocore.client import Config
@@ -37,7 +37,7 @@ class S3Service:
         self,
         file_name: str,
         content_type: str,
-        record_id: uuid.UUID,
+        record_id: Union[int, str],
     ) -> Dict[str, str]:
         logger.info(
             "Generating presigned upload URL",

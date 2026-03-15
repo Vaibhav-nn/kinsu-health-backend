@@ -1,7 +1,7 @@
 import os
 import uuid
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Union
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -21,7 +21,7 @@ class FileStorageService:
     def generate_upload_path(
         self,
         file_name: str,
-        record_id: uuid.UUID,
+        record_id: Union[int, str],
     ) -> Dict[str, str]:
         file_extension = ""
         if "." in file_name:
