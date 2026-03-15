@@ -22,6 +22,9 @@ from app.schemas.vault import (
 )
 from app.services.s3 import s3_service
 from app.services.storage import storage_service
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -33,6 +36,11 @@ async def get_records(
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
 ) -> RecordListResponse:
+    logger.debug(
+        "Fetching health records",
+        extra={"extra_fields": {"record_type": record_type, "page": page, "limit": limit}},
+    )
+    
     offset = (page - 1) * limit
     
     query = select(HealthRecord).order_by(HealthRecord.record_date.desc())
@@ -50,6 +58,11 @@ async def get_records(
     count_result = await db.execute(count_query)
     total = len(count_result.scalars().all())
     
+    logger.info(
+        "Health records retrieved",
+        extra={"extra_fields": {"count": len(records), "total": total, "page": page}},
+    )
+    
     return RecordListResponse(
         records=[RecordResponse.model_validate(r) for r in records],
         total=total,
@@ -63,6 +76,11 @@ async def upload_records(
     body: RecordCreateBatch,
     db: AsyncSession = Depends(get_db),
 ) -> UploadRecordsResponse:
+    logger.info(
+        "Creating health records",
+        extra={"extra_fields": {"count": len(body.records)}},
+    )
+    
     records = [
         HealthRecord(
             record_type=r.record_type,
@@ -75,6 +93,12 @@ async def upload_records(
     db.add_all(records)
     await db.flush()
     ids = [r.id for r in records]
+    
+    logger.info(
+        "Health records created successfully",
+        extra={"extra_fields": {"count": len(ids)}},
+    )
+    
     return UploadRecordsResponse(created=len(ids), record_ids=ids)
 
 
@@ -84,12 +108,24 @@ async def upload_file_direct(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
 ) -> FileUploadResponse:
+    logger.info(
+        "Direct file upload initiated",
+        extra={
+            "extra_fields": {
+                "record_id": record_id,
+                "filename": file.filename,
+                "content_type": file.content_type,
+            }
+        },
+    )
+    
     result = await db.execute(
         select(HealthRecord).where(HealthRecord.id == record_id)
     )
     record = result.scalar_one_or_none()
     
     if not record:
+        logger.warning("Health record not found for upload", extra={"extra_fields": {"record_id": record_id}})
         raise HTTPException(status_code=404, detail="Health record not found")
     
     if settings.STORAGE_BACKEND == "local":
@@ -108,6 +144,17 @@ async def upload_file_direct(
         
         await db.flush()
         
+        logger.info(
+            "File uploaded successfully",
+            extra={
+                "extra_fields": {
+                    "record_id": record_id,
+                    "filename": file.filename,
+                    "file_size": file_size,
+                }
+            },
+        )
+        
         return FileUploadResponse(
             success=True,
             message="File uploaded successfully",
@@ -120,10 +167,19 @@ async def upload_file_direct(
 
 @router.get("/files/{record_id}/{filename}")
 async def download_file(record_id: str, filename: str):
+    logger.debug(
+        "File download requested",
+        extra={"extra_fields": {"record_id": record_id, "filename": filename}},
+    )
+    
     if settings.STORAGE_BACKEND == "local":
         relative_path = f"{record_id}/{filename}"
         
         if not storage_service.verify_file_exists(relative_path):
+            logger.warning(
+                "File not found for download",
+                extra={"extra_fields": {"record_id": record_id, "filename": filename}},
+            )
             raise HTTPException(status_code=404, detail="File not found")
         
         file_path = storage_service.storage_dir / relative_path
@@ -144,6 +200,11 @@ async def download_file(record_id: str, filename: str):
         response.headers["Access-Control-Allow-Origin"] = "*"
         response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
         response.headers["Access-Control-Allow-Headers"] = "*"
+        
+        logger.info(
+            "File served successfully",
+            extra={"extra_fields": {"record_id": record_id, "filename": filename}},
+        )
         
         return response
     else:
@@ -173,12 +234,23 @@ async def get_upload_url(
             detail="Presigned URLs not supported with local storage. Use POST /records/{record_id}/upload instead"
         )
     
+    logger.info(
+        "Generating presigned upload URL",
+        extra={
+            "extra_fields": {
+                "record_id": str(body.record_id),
+                "filename": body.file_name,
+            }
+        },
+    )
+    
     result = await db.execute(
         select(HealthRecord).where(HealthRecord.id == body.record_id)
     )
     record = result.scalar_one_or_none()
     
     if not record:
+        logger.warning("Health record not found for presigned URL", extra={"extra_fields": {"record_id": str(body.record_id)}})
         raise HTTPException(status_code=404, detail="Health record not found")
     
     try:
@@ -188,12 +260,21 @@ async def get_upload_url(
             record_id=body.record_id,
         )
         
+        logger.info(
+            "Presigned upload URL generated",
+            extra={"extra_fields": {"record_id": str(body.record_id), "s3_key": presigned_data["s3_key"]}},
+        )
+        
         return PresignedUploadResponse(
             presigned_url=presigned_data["presigned_url"],
             s3_key=presigned_data["s3_key"],
             expires_in=settings.S3_PRESIGNED_URL_EXPIRATION,
         )
     except Exception as e:
+        logger.exception(
+            "Failed to generate presigned upload URL",
+            extra={"extra_fields": {"record_id": str(body.record_id), "error": str(e)}},
+        )
         raise HTTPException(status_code=500, detail=f"Failed to generate upload URL: {str(e)}")
 
 
@@ -208,20 +289,39 @@ async def confirm_file_upload(
             detail="Confirm upload not needed with local storage. Use POST /records/{record_id}/upload instead"
         )
     
+    logger.info(
+        "Confirming file upload",
+        extra={
+            "extra_fields": {
+                "record_id": str(body.record_id),
+                "s3_key": body.s3_key,
+            }
+        },
+    )
+    
     result = await db.execute(
         select(HealthRecord).where(HealthRecord.id == body.record_id)
     )
     record = result.scalar_one_or_none()
     
     if not record:
+        logger.warning("Health record not found for upload confirmation", extra={"extra_fields": {"record_id": str(body.record_id)}})
         raise HTTPException(status_code=404, detail="Health record not found")
     
     if not s3_service.verify_file_exists(body.s3_key):
+        logger.error(
+            "File not found in S3 after upload",
+            extra={"extra_fields": {"s3_key": body.s3_key, "record_id": str(body.record_id)}},
+        )
         raise HTTPException(status_code=400, detail="File not found in S3")
     
     try:
         file_size = s3_service.get_file_size(body.s3_key)
     except Exception as e:
+        logger.exception(
+            "Failed to get file info from S3",
+            extra={"extra_fields": {"s3_key": body.s3_key, "error": str(e)}},
+        )
         raise HTTPException(status_code=500, detail=f"Failed to get file info: {str(e)}")
     
     file_url = f"https://{settings.S3_BUCKET_NAME}.s3.{settings.AWS_REGION}.amazonaws.com/{body.s3_key}"
@@ -231,6 +331,17 @@ async def confirm_file_upload(
     record.file_uploaded_at = datetime.utcnow()
     
     await db.flush()
+    
+    logger.info(
+        "File upload confirmed and metadata saved",
+        extra={
+            "extra_fields": {
+                "record_id": str(body.record_id),
+                "file_size": file_size,
+                "s3_key": body.s3_key,
+            }
+        },
+    )
     
     return FileUploadConfirmationResponse(
         success=True,

@@ -4,7 +4,8 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1._utils import get_user_owned_or_404, model_list
 from app.api.deps import get_current_user
@@ -17,6 +18,9 @@ from app.schemas.health import (
     VitalTrendPoint,
     VitalTrendResponse,
 )
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/vitals", tags=["Vitals"])
 
@@ -25,13 +29,30 @@ router = APIRouter(prefix="/vitals", tags=["Vitals"])
 async def log_vital(
     payload: VitalLogCreate,
     user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> VitalLogResponse:
     """Log a new vital reading (heart rate, BP, SpO2, etc.)."""
+    logger.info(
+        "Logging new vital",
+        extra={
+            "extra_fields": {
+                "user_id": str(user.id),
+                "vital_type": payload.vital_type,
+                "value": payload.value,
+            }
+        },
+    )
+    
     vital = VitalLog(user_id=user.id, **payload.model_dump())
     db.add(vital)
-    db.commit()
-    db.refresh(vital)
+    await db.flush()
+    await db.refresh(vital)
+    
+    logger.debug(
+        "Vital logged successfully",
+        extra={"extra_fields": {"vital_id": vital.id}},
+    )
+    
     return VitalLogResponse.model_validate(vital)
 
 
@@ -43,19 +64,40 @@ async def list_vitals(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> list[VitalLogResponse]:
     """List vital readings with optional filters."""
-    query = db.query(VitalLog).filter(VitalLog.user_id == user.id)
+    logger.debug(
+        "Listing vitals",
+        extra={
+            "extra_fields": {
+                "user_id": str(user.id),
+                "vital_type": vital_type,
+                "limit": limit,
+                "offset": offset,
+            }
+        },
+    )
+    
+    query = select(VitalLog).where(VitalLog.user_id == user.id)
 
     if vital_type:
-        query = query.filter(VitalLog.vital_type == vital_type)
+        query = query.where(VitalLog.vital_type == vital_type)
     if start_date:
-        query = query.filter(VitalLog.recorded_at >= start_date)
+        query = query.where(VitalLog.recorded_at >= start_date)
     if end_date:
-        query = query.filter(VitalLog.recorded_at <= end_date)
+        query = query.where(VitalLog.recorded_at <= end_date)
 
-    vitals = query.order_by(VitalLog.recorded_at.desc()).offset(offset).limit(limit).all()
+    result = await db.execute(
+        query.order_by(VitalLog.recorded_at.desc()).offset(offset).limit(limit)
+    )
+    vitals = result.scalars().all()
+    
+    logger.info(
+        "Vitals retrieved",
+        extra={"extra_fields": {"count": len(vitals), "vital_type": vital_type}},
+    )
+    
     return model_list(vitals, VitalLogResponse)
 
 
@@ -65,22 +107,32 @@ async def vital_trends(
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
     user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> VitalTrendResponse:
     """Get aggregated trend data for a specific vital type (for charts)."""
-    query = db.query(VitalLog).filter(
+    logger.debug(
+        "Fetching vital trends",
+        extra={"extra_fields": {"user_id": str(user.id), "vital_type": vital_type}},
+    )
+    
+    query = select(VitalLog).where(
         VitalLog.user_id == user.id,
         VitalLog.vital_type == vital_type,
     )
 
     if start_date:
-        query = query.filter(VitalLog.recorded_at >= start_date)
+        query = query.where(VitalLog.recorded_at >= start_date)
     if end_date:
-        query = query.filter(VitalLog.recorded_at <= end_date)
+        query = query.where(VitalLog.recorded_at <= end_date)
 
-    vitals = query.order_by(VitalLog.recorded_at.asc()).all()
+    result = await db.execute(query.order_by(VitalLog.recorded_at.asc()))
+    vitals = result.scalars().all()
 
     if not vitals:
+        logger.info(
+            "No vitals found for trend analysis",
+            extra={"extra_fields": {"vital_type": vital_type}},
+        )
         return VitalTrendResponse(
             vital_type=vital_type,
             unit="",
@@ -99,6 +151,17 @@ async def vital_trends(
 
     values = [v.value for v in vitals]
 
+    logger.info(
+        "Vital trends calculated",
+        extra={
+            "extra_fields": {
+                "vital_type": vital_type,
+                "count": len(vitals),
+                "avg_value": round(sum(values) / len(values), 2),
+            }
+        },
+    )
+
     return VitalTrendResponse(
         vital_type=vital_type,
         unit=vitals[0].unit,
@@ -114,10 +177,12 @@ async def vital_trends(
 async def get_vital(
     vital_id: int,
     user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> VitalLogResponse:
     """Get a single vital reading by ID."""
-    vital = get_user_owned_or_404(
+    logger.debug("Fetching vital by ID", extra={"extra_fields": {"vital_id": vital_id}})
+    
+    vital = await get_user_owned_or_404(
         db,
         VitalLog,
         item_id=vital_id,
@@ -131,15 +196,22 @@ async def get_vital(
 async def delete_vital(
     vital_id: int,
     user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> None:
     """Delete a vital reading."""
-    vital = get_user_owned_or_404(
+    logger.info(
+        "Deleting vital",
+        extra={"extra_fields": {"vital_id": vital_id, "user_id": str(user.id)}},
+    )
+    
+    vital = await get_user_owned_or_404(
         db,
         VitalLog,
         item_id=vital_id,
         user_id=user.id,
         not_found_detail="Vital log not found.",
     )
-    db.delete(vital)
-    db.commit()
+    await db.delete(vital)
+    await db.flush()
+    
+    logger.info("Vital deleted successfully", extra={"extra_fields": {"vital_id": vital_id}})

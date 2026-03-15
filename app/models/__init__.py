@@ -7,8 +7,8 @@ from app.models.reminder import Reminder
 from app.models.symptom import ChronicSymptom
 from app.models.user import User
 from app.models.vital import VitalLog
-from app.models.base import Base
 from app.models.vault import HealthRecord
+from app.core.database import Base
 
 __all__ = [
     "User",
@@ -20,5 +20,6 @@ __all__ = [
     "Reminder",
     "HomePreference",
     "HomeNotification",
-    "Base", "HealthRecord"
+    "HealthRecord",
+    "Base",
 ]

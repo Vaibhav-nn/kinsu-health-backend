@@ -14,8 +14,15 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Always read the runtime DB URL from app settings/.env.
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# Convert async DATABASE_URL to sync for Alembic
+# Alembic doesn't support async drivers, so we need to convert
+database_url = settings.DATABASE_URL
+if "postgresql+asyncpg" in database_url:
+    database_url = database_url.replace("postgresql+asyncpg", "postgresql+psycopg2")
+elif "sqlite+aiosqlite" in database_url:
+    database_url = database_url.replace("sqlite+aiosqlite", "sqlite")
+
+config.set_main_option("sqlalchemy.url", database_url)
 
 target_metadata = Base.metadata
 

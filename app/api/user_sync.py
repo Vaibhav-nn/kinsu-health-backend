@@ -1,8 +1,12 @@
 """Helpers to sync Firebase-authenticated users into local DB."""
 
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 def _email_from_token(decoded_token: dict, firebase_uid: str) -> str:
@@ -11,10 +15,15 @@ def _email_from_token(decoded_token: dict, firebase_uid: str) -> str:
     if email:
         return email
     # Fallback keeps DB constraints valid for providers/tokens without email.
-    return f"{firebase_uid}@firebase.local"
+    fallback = f"{firebase_uid}@firebase.local"
+    logger.debug(
+        "Using fallback email for Firebase user",
+        extra={"extra_fields": {"firebase_uid": firebase_uid, "fallback_email": fallback}},
+    )
+    return fallback
 
 
-def upsert_user_from_decoded_token(db: Session, decoded_token: dict) -> tuple[User, bool]:
+async def upsert_user_from_decoded_token(db: AsyncSession, decoded_token: dict) -> tuple[User, bool]:
     """Upsert and return the local user for a decoded Firebase token.
 
     Returns:
@@ -22,14 +31,21 @@ def upsert_user_from_decoded_token(db: Session, decoded_token: dict) -> tuple[Us
     """
     firebase_uid: str = (decoded_token.get("uid") or "").strip()
     if not firebase_uid:
+        logger.error("Decoded token missing 'uid'")
         raise ValueError("Decoded token is missing 'uid'.")
 
     email = _email_from_token(decoded_token, firebase_uid)
     display_name: str | None = decoded_token.get("name")
 
-    user = db.query(User).filter(User.firebase_uid == firebase_uid).first()
+    logger.debug(
+        "Upserting user from Firebase token",
+        extra={"extra_fields": {"firebase_uid": firebase_uid, "email": email}},
+    )
+
+    result = await db.execute(select(User).where(User.firebase_uid == firebase_uid))
+    user = result.scalar_one_or_none()
     created = False
-    should_commit = False
+    should_flush = False
 
     if user is None:
         user = User(
@@ -39,17 +55,29 @@ def upsert_user_from_decoded_token(db: Session, decoded_token: dict) -> tuple[Us
         )
         db.add(user)
         created = True
-        should_commit = True
+        should_flush = True
+        logger.info(
+            "Creating new user from Firebase token",
+            extra={"extra_fields": {"firebase_uid": firebase_uid, "email": email}},
+        )
     else:
         if user.email != email:
+            logger.info(
+                "Updating user email",
+                extra={"extra_fields": {"user_id": str(user.id), "old_email": user.email, "new_email": email}},
+            )
             user.email = email
-            should_commit = True
+            should_flush = True
         if display_name and user.display_name != display_name:
+            logger.debug(
+                "Updating user display name",
+                extra={"extra_fields": {"user_id": str(user.id), "new_display_name": display_name}},
+            )
             user.display_name = display_name
-            should_commit = True
+            should_flush = True
 
-    if should_commit:
-        db.commit()
-        db.refresh(user)
+    if should_flush:
+        await db.flush()
+        await db.refresh(user)
 
     return user, created

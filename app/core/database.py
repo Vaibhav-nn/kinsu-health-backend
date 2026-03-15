@@ -1,31 +1,34 @@
 """SQLAlchemy database engine, session factory, and declarative base.
 
-Adapter Pattern: To switch from SQLite → PostgreSQL, change only the
-DATABASE_URL in your .env file. No code changes required.
+Supports both async (PostgreSQL via asyncpg) and sync (SQLite) databases.
+Configure via DATABASE_URL in your .env file.
 """
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
-from typing import Generator
+from collections.abc import AsyncGenerator
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 # ── Engine ────────────────────────────────────────────────
-# SQLite requires check_same_thread=False for FastAPI's async workers.
-# This kwarg is harmlessly ignored by PostgreSQL drivers.
-connect_args: dict = {}
-if settings.DATABASE_URL.startswith("sqlite"):
-    connect_args = {"check_same_thread": False}
-
-engine = create_engine(
+engine = create_async_engine(
     settings.DATABASE_URL,
-    connect_args=connect_args,
     echo=False,
 )
 
 # ── Session ───────────────────────────────────────────────
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+async_session_factory = async_sessionmaker(
+    engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autocommit=False,
+    autoflush=False,
+)
 
 
 # ── Declarative Base ──────────────────────────────────────
@@ -35,16 +38,44 @@ class Base(DeclarativeBase):
 
 
 # ── Dependency ────────────────────────────────────────────
-def get_db() -> Generator:
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """FastAPI dependency that yields a database session.
 
     Usage:
         @app.get("/items")
-        def read_items(db: Session = Depends(get_db)):
+        async def read_items(db: AsyncSession = Depends(get_db)):
             ...
     """
-    db = SessionLocal()
+    async with async_session_factory() as session:
+        try:
+            yield session
+            await session.commit()
+            logger.debug("Database session committed successfully")
+        except Exception as e:
+            await session.rollback()
+            logger.error(
+                "Database session rolled back due to error",
+                extra={"extra_fields": {"error": str(e)}},
+            )
+            raise
+        finally:
+            await session.close()
+
+
+# ── Database Initialization ───────────────────────────────
+async def init_db() -> None:
+    """Initialize database tables (for development only).
+    
+    In production, use Alembic migrations instead.
+    """
+    logger.info("Initializing database tables")
     try:
-        yield db
-    finally:
-        db.close()
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database tables initialized successfully")
+    except Exception as e:
+        logger.exception(
+            "Failed to initialize database",
+            extra={"extra_fields": {"error": str(e)}},
+        )
+        raise

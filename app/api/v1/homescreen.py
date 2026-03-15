@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy import func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.core.database import get_db
@@ -28,6 +28,9 @@ from app.schemas.homescreen import (
     HomeTopBarData,
     HomeTopBarProfile,
 )
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/homescreen", tags=["Homescreen"])
 
@@ -36,13 +39,14 @@ def _normalize_theme_mode(value: str) -> str:
     return value if value in {"light", "dark", "system"} else "system"
 
 
-def _get_or_create_preference(db: Session, user_id: int) -> HomePreference:
-    pref = db.query(HomePreference).filter(HomePreference.user_id == user_id).first()
+async def _get_or_create_preference(db: AsyncSession, user_id: int) -> HomePreference:
+    result = await db.execute(select(HomePreference).where(HomePreference.user_id == user_id))
+    pref = result.scalar_one_or_none()
     if pref is None:
         pref = HomePreference(user_id=user_id, theme_mode="system")
         db.add(pref)
-        db.commit()
-        db.refresh(pref)
+        await db.flush()
+        await db.refresh(pref)
     return pref
 
 
@@ -86,32 +90,41 @@ def _resolve_animation(active_symptoms: int, active_medications: int) -> HomeAni
 @router.get("/overview", response_model=HomeOverviewResponse)
 async def homescreen_overview(
     user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> HomeOverviewResponse:
     """Get homescreen payload for top bar, animation, quick cards, and nav."""
-    pref = _get_or_create_preference(db, user.id)
-    unread_count = (
-        db.query(HomeNotification)
-        .filter(HomeNotification.user_id == user.id, HomeNotification.is_read.is_(False))
-        .count()
+    logger.debug("Fetching homescreen overview", extra={"extra_fields": {"user_id": str(user.id)}})
+    
+    pref = await _get_or_create_preference(db, user.id)
+    
+    unread_result = await db.execute(
+        select(func.count())
+        .select_from(HomeNotification)
+        .where(HomeNotification.user_id == user.id, HomeNotification.is_read.is_(False))
     )
+    unread_count = unread_result.scalar()
 
-    latest_vital = (
-        db.query(VitalLog)
-        .filter(VitalLog.user_id == user.id)
+    latest_vital_result = await db.execute(
+        select(VitalLog)
+        .where(VitalLog.user_id == user.id)
         .order_by(VitalLog.recorded_at.desc())
-        .first()
+        .limit(1)
     )
-    active_symptoms = (
-        db.query(ChronicSymptom)
-        .filter(ChronicSymptom.user_id == user.id, ChronicSymptom.is_active.is_(True))
-        .count()
+    latest_vital = latest_vital_result.scalar_one_or_none()
+    
+    active_symptoms_result = await db.execute(
+        select(func.count())
+        .select_from(ChronicSymptom)
+        .where(ChronicSymptom.user_id == user.id, ChronicSymptom.is_active.is_(True))
     )
-    active_medications = (
-        db.query(Medication)
-        .filter(Medication.user_id == user.id, Medication.is_active.is_(True))
-        .count()
+    active_symptoms = active_symptoms_result.scalar()
+    
+    active_medications_result = await db.execute(
+        select(func.count())
+        .select_from(Medication)
+        .where(Medication.user_id == user.id, Medication.is_active.is_(True))
     )
+    active_medications = active_medications_result.scalar()
 
     vital_value = "No vitals yet"
     vital_subtitle = "Add your first vital log"
@@ -168,9 +181,11 @@ async def homescreen_overview(
 async def homescreen_search(
     q: str = Query(..., min_length=1, max_length=120, description="Search query"),
     user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> HomeSearchResponse:
     """Search across vitals, symptoms, and medications for homescreen results."""
+    logger.info("Homescreen search initiated", extra={"extra_fields": {"query": q, "user_id": str(user.id)}})
+    
     term = q.strip()
     if not term:
         return HomeSearchResponse(query=q, total=0, results=[])
@@ -178,9 +193,9 @@ async def homescreen_search(
     pattern = f"%{term}%"
     results: list[HomeSearchResultItem] = []
 
-    vitals = (
-        db.query(VitalLog)
-        .filter(
+    vitals_result = await db.execute(
+        select(VitalLog)
+        .where(
             VitalLog.user_id == user.id,
             or_(
                 VitalLog.vital_type.ilike(pattern),
@@ -190,8 +205,8 @@ async def homescreen_search(
         )
         .order_by(VitalLog.recorded_at.desc())
         .limit(10)
-        .all()
     )
+    vitals = vitals_result.scalars().all()
 
     for item in vitals:
         results.append(
@@ -204,9 +219,9 @@ async def homescreen_search(
             )
         )
 
-    symptoms = (
-        db.query(ChronicSymptom)
-        .filter(
+    symptoms_result = await db.execute(
+        select(ChronicSymptom)
+        .where(
             ChronicSymptom.user_id == user.id,
             or_(
                 ChronicSymptom.symptom_name.ilike(pattern),
@@ -217,8 +232,8 @@ async def homescreen_search(
         )
         .order_by(ChronicSymptom.updated_at.desc())
         .limit(10)
-        .all()
     )
+    symptoms = symptoms_result.scalars().all()
 
     for item in symptoms:
         results.append(
@@ -231,9 +246,9 @@ async def homescreen_search(
             )
         )
 
-    medications = (
-        db.query(Medication)
-        .filter(
+    medications_result = await db.execute(
+        select(Medication)
+        .where(
             Medication.user_id == user.id,
             or_(
                 Medication.name.ilike(pattern),
@@ -244,8 +259,8 @@ async def homescreen_search(
         )
         .order_by(Medication.updated_at.desc())
         .limit(10)
-        .all()
     )
+    medications = medications_result.scalars().all()
 
     for item in medications:
         results.append(
@@ -258,6 +273,8 @@ async def homescreen_search(
             )
         )
 
+    logger.info("Homescreen search completed", extra={"extra_fields": {"query": q, "results_count": len(results)}})
+
     return HomeSearchResponse(query=q, total=len(results), results=results)
 
 
@@ -267,15 +284,18 @@ async def list_home_notifications(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> list[HomeNotificationResponse]:
     """List homescreen notifications for the current user."""
-    query = db.query(HomeNotification).filter(HomeNotification.user_id == user.id)
+    query = select(HomeNotification).where(HomeNotification.user_id == user.id)
 
     if is_read is not None:
-        query = query.filter(HomeNotification.is_read == is_read)
+        query = query.where(HomeNotification.is_read == is_read)
 
-    notifications = query.order_by(HomeNotification.created_at.desc()).offset(offset).limit(limit).all()
+    result = await db.execute(
+        query.order_by(HomeNotification.created_at.desc()).offset(offset).limit(limit)
+    )
+    notifications = result.scalars().all()
     return [HomeNotificationResponse.model_validate(item) for item in notifications]
 
 
@@ -287,13 +307,13 @@ async def list_home_notifications(
 async def create_home_notification(
     payload: HomeNotificationCreate,
     user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> HomeNotificationResponse:
     """Create a homescreen notification entry."""
     notification = HomeNotification(user_id=user.id, **payload.model_dump())
     db.add(notification)
-    db.commit()
-    db.refresh(notification)
+    await db.flush()
+    await db.refresh(notification)
     return HomeNotificationResponse.model_validate(notification)
 
 
@@ -301,13 +321,16 @@ async def create_home_notification(
 async def mark_home_notification_read(
     notification_id: int,
     user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> HomeNotificationResponse:
     """Mark a homescreen notification as read."""
-    notification = db.query(HomeNotification).filter(
-        HomeNotification.id == notification_id,
-        HomeNotification.user_id == user.id,
-    ).first()
+    result = await db.execute(
+        select(HomeNotification).where(
+            HomeNotification.id == notification_id,
+            HomeNotification.user_id == user.id,
+        )
+    )
+    notification = result.scalar_one_or_none()
 
     if not notification:
         raise HTTPException(status_code=404, detail="Notification not found.")
@@ -315,8 +338,8 @@ async def mark_home_notification_read(
     if not notification.is_read:
         notification.is_read = True
         notification.read_at = datetime.now(timezone.utc)
-        db.commit()
-        db.refresh(notification)
+        await db.flush()
+        await db.refresh(notification)
 
     return HomeNotificationResponse.model_validate(notification)
 
@@ -324,10 +347,10 @@ async def mark_home_notification_read(
 @router.get("/preferences", response_model=HomePreferenceResponse)
 async def get_home_preferences(
     user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> HomePreferenceResponse:
     """Get homescreen preference settings for the current user."""
-    pref = _get_or_create_preference(db, user.id)
+    pref = await _get_or_create_preference(db, user.id)
     return HomePreferenceResponse.model_validate(pref)
 
 
@@ -335,11 +358,11 @@ async def get_home_preferences(
 async def update_home_theme_preference(
     payload: HomeThemeUpdate,
     user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> HomePreferenceResponse:
     """Update homescreen theme mode (light, dark, or system)."""
-    pref = _get_or_create_preference(db, user.id)
+    pref = await _get_or_create_preference(db, user.id)
     pref.theme_mode = payload.theme_mode
-    db.commit()
-    db.refresh(pref)
+    await db.flush()
+    await db.refresh(pref)
     return HomePreferenceResponse.model_validate(pref)
