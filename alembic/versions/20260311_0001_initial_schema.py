@@ -34,6 +34,27 @@ def upgrade() -> None:
     op.create_index("ix_users_firebase_uid", "users", ["firebase_uid"], unique=False)
 
     op.create_table(
+        "health_records",
+        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
+        sa.Column("user_id", sa.Integer(), nullable=False),
+        sa.Column("record_type", sa.String(length=100), nullable=False),
+        sa.Column("record_date", sa.Date(), nullable=False),
+        sa.Column("title", sa.String(length=500), nullable=False),
+        sa.Column("notes", sa.Text(), nullable=True),
+        sa.Column("file_name", sa.String(length=500), nullable=True),
+        sa.Column("file_url", sa.String(length=1000), nullable=True),
+        sa.Column("file_size", sa.Integer(), nullable=True),
+        sa.Column("file_uploaded_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_index("ix_health_records_user_id", "health_records", ["user_id"], unique=False)
+    op.create_index("ix_health_records_record_type", "health_records", ["record_type"], unique=False)
+    op.create_index("ix_health_records_record_date", "health_records", ["record_date"], unique=False)
+
+    op.create_table(
         "home_preferences",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
         sa.Column("user_id", sa.Integer(), nullable=False),
@@ -214,6 +235,11 @@ def downgrade() -> None:
 
     op.drop_index("ix_home_preferences_user_id", table_name="home_preferences")
     op.drop_table("home_preferences")
+
+    op.drop_index("ix_health_records_record_date", table_name="health_records")
+    op.drop_index("ix_health_records_record_type", table_name="health_records")
+    op.drop_index("ix_health_records_user_id", table_name="health_records")
+    op.drop_table("health_records")
 
     op.drop_index("ix_users_firebase_uid", table_name="users")
     op.drop_table("users")
