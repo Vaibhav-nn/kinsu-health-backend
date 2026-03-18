@@ -42,7 +42,11 @@ async def upsert_user_from_decoded_token(db: AsyncSession, decoded_token: dict) 
         extra={"extra_fields": {"firebase_uid": firebase_uid, "email": email}},
     )
 
-    result = await db.execute(select(User).where(User.firebase_uid == firebase_uid))
+    result = await db.execute(
+        select(User).where(
+            (User.firebase_uid == firebase_uid) | (User.email == email)
+        )
+    )
     user = result.scalar_one_or_none()
     created = False
     should_flush = False
@@ -61,6 +65,13 @@ async def upsert_user_from_decoded_token(db: AsyncSession, decoded_token: dict) 
             extra={"extra_fields": {"firebase_uid": firebase_uid, "email": email}},
         )
     else:
+        if user.firebase_uid != firebase_uid:
+            logger.info(
+                "Updating user Firebase UID",
+                extra={"extra_fields": {"user_id": str(user.id), "old_uid": user.firebase_uid, "new_uid": firebase_uid}},
+            )
+            user.firebase_uid = firebase_uid
+            should_flush = True
         if user.email != email:
             logger.info(
                 "Updating user email",

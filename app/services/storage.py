@@ -33,7 +33,7 @@ class FileStorageService:
         
         file_path = record_dir / unique_filename
         relative_path = f"{record_id}/{unique_filename}"
-        file_url = f"{settings.BASE_URL}/vault/files/{relative_path}"
+        file_url = f"{settings.BASE_URL}/api/v1/vault/files/{relative_path}"
         
         logger.debug(
             "Generated upload path",

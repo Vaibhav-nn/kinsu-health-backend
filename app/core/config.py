@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     # ── Application ───────────────────────────────────────
     PROJECT_NAME: str = "Kinsu Health API"
     API_V1_PREFIX: str = "/api/v1"
-    BASE_URL: str = "http://localhost:8000"
+    BASE_URL: str = "http://127.0.0.1:8501"
 
     # ── Database ──────────────────────────────────────────
     # Default to async PostgreSQL; supports SQLite with sqlite+aiosqlite://

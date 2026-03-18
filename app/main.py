@@ -185,7 +185,7 @@ app.include_router(illness_router, prefix=settings.API_V1_PREFIX)
 app.include_router(medications_router, prefix=settings.API_V1_PREFIX)
 app.include_router(reminders_router, prefix=settings.API_V1_PREFIX)
 app.include_router(homescreen_router, prefix=settings.API_V1_PREFIX)
-app.include_router(vault_router, prefix="/vault", tags=["vault"])
+app.include_router(vault_router, prefix=f"{settings.API_V1_PREFIX}/vault", tags=["vault"])
 
 
 
