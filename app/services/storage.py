@@ -3,18 +3,18 @@ import uuid
 from pathlib import Path
 from typing import Dict
 
-from app.config import settings
+from app.core.config import settings
 
 
 class FileStorageService:
     def __init__(self):
-        self.storage_dir = Path(settings.file_storage_path)
+        self.storage_dir = Path(settings.FILE_STORAGE_PATH)
         self.storage_dir.mkdir(parents=True, exist_ok=True)
 
     def generate_upload_path(
         self,
         file_name: str,
-        record_id: uuid.UUID,
+        record_id: str,
     ) -> Dict[str, str]:
         file_extension = ""
         if "." in file_name:
@@ -26,7 +26,10 @@ class FileStorageService:
         
         file_path = record_dir / unique_filename
         relative_path = f"{record_id}/{unique_filename}"
-        file_url = f"{settings.base_url}/vault/files/{relative_path}"
+        file_url = (
+            f"{settings.BASE_URL}"
+            f"{settings.API_V1_PREFIX}/vault/files/{relative_path}"
+        )
         
         return {
             "file_path": str(file_path),

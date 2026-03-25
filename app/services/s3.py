@@ -5,25 +5,25 @@ import boto3
 from botocore.client import Config
 from botocore.exceptions import ClientError
 
-from app.config import settings
+from app.core.config import settings
 
 
 class S3Service:
     def __init__(self):
         self.s3_client = boto3.client(
             "s3",
-            aws_access_key_id=settings.aws_access_key_id,
-            aws_secret_access_key=settings.aws_secret_access_key,
-            region_name=settings.aws_region,
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+            region_name=settings.AWS_REGION,
             config=Config(signature_version="s3v4"),
         )
-        self.bucket_name = settings.s3_bucket_name
+        self.bucket_name = settings.S3_BUCKET_NAME
 
     def generate_presigned_upload_url(
         self,
         file_name: str,
         content_type: str,
-        record_id: uuid.UUID,
+        record_id: str,
     ) -> Dict[str, str]:
         file_extension = ""
         if "." in file_name:
@@ -39,10 +39,13 @@ class S3Service:
                     "Key": s3_key,
                     "ContentType": content_type,
                 },
-                ExpiresIn=settings.s3_presigned_url_expiration,
+                ExpiresIn=settings.S3_PRESIGNED_URL_EXPIRATION,
             )
-            
-            file_url = f"https://{self.bucket_name}.s3.{settings.aws_region}.amazonaws.com/{s3_key}"
+
+            file_url = (
+                f"https://{self.bucket_name}.s3."
+                f"{settings.AWS_REGION}.amazonaws.com/{s3_key}"
+            )
             
             return {
                 "presigned_url": presigned_url,
@@ -60,7 +63,7 @@ class S3Service:
                     "Bucket": self.bucket_name,
                     "Key": s3_key,
                 },
-                ExpiresIn=settings.s3_presigned_url_expiration,
+                ExpiresIn=settings.S3_PRESIGNED_URL_EXPIRATION,
             )
             return presigned_url
         except ClientError as e:

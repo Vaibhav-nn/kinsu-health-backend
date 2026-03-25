@@ -1,6 +1,5 @@
 from datetime import date, datetime
 from typing import Optional
-from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -17,7 +16,7 @@ class RecordCreateBatch(BaseModel):
 
 
 class RecordResponse(BaseModel):
-    id: UUID
+    id: str
     record_type: str
     record_date: date
     title: str
@@ -32,11 +31,11 @@ class RecordResponse(BaseModel):
 
 class UploadRecordsResponse(BaseModel):
     created: int
-    record_ids: list[UUID]
+    record_ids: list[str]
 
 
 class PresignedUploadRequest(BaseModel):
-    record_id: UUID
+    record_id: str
     file_name: str
     content_type: str
 
@@ -48,7 +47,7 @@ class PresignedUploadResponse(BaseModel):
 
 
 class FileUploadConfirmation(BaseModel):
-    record_id: UUID
+    record_id: str
     s3_key: str
     file_name: str
 
