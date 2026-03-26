@@ -1,5 +1,7 @@
 """Helpers to sync Firebase-authenticated users into local DB."""
 
+from datetime import datetime, timezone
+
 from sqlalchemy.orm import Session
 
 from app.models.user import User
@@ -26,6 +28,10 @@ def upsert_user_from_decoded_token(db: Session, decoded_token: dict) -> tuple[Us
 
     email = _email_from_token(decoded_token, firebase_uid)
     display_name: str | None = decoded_token.get("name")
+    auth_provider: str | None = (
+        (decoded_token.get("firebase") or {}).get("sign_in_provider")
+    )
+    now = datetime.now(timezone.utc)
 
     user = db.query(User).filter(User.firebase_uid == firebase_uid).first()
     created = False
@@ -36,6 +42,8 @@ def upsert_user_from_decoded_token(db: Session, decoded_token: dict) -> tuple[Us
             firebase_uid=firebase_uid,
             email=email,
             display_name=display_name,
+            auth_provider=auth_provider,
+            last_login_at=now,
         )
         db.add(user)
         created = True
@@ -47,6 +55,11 @@ def upsert_user_from_decoded_token(db: Session, decoded_token: dict) -> tuple[Us
         if display_name and user.display_name != display_name:
             user.display_name = display_name
             should_commit = True
+        if auth_provider and user.auth_provider != auth_provider:
+            user.auth_provider = auth_provider
+            should_commit = True
+        user.last_login_at = now
+        should_commit = True
 
     if should_commit:
         db.commit()

@@ -3,6 +3,7 @@
 import shutil
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -92,6 +93,59 @@ class TestApiRouteGroups(unittest.TestCase):
         body = response.json()
         self.assertIn(body["message"], {"User created successfully.", "Login successful."})
         self.assertEqual(body["user"]["firebase_uid"], "firebase-route-user")
+
+    def test_auth_profile_and_consent_routes(self) -> None:
+        login = self.client.post("/api/v1/auth/login", headers=self._headers())
+        self.assertEqual(login.status_code, 200)
+
+        initial_profile = self.client.get("/api/v1/auth/profile", headers=self._headers())
+        self.assertEqual(initial_profile.status_code, 200)
+        self.assertIsNone(initial_profile.json()["user"]["onboarding_completed_at"])
+
+        consent = self.client.post(
+            "/api/v1/auth/consent",
+            headers=self._headers(),
+            json={"accepted": True},
+        )
+        self.assertEqual(consent.status_code, 200)
+        self.assertIsNotNone(consent.json()["user"]["consent_accepted_at"])
+
+        updated = self.client.put(
+            "/api/v1/auth/profile",
+            headers=self._headers(),
+            json={
+                "display_name": "Priya Sharma",
+                "gender": "female",
+                "date_of_birth": "1992-03-15",
+                "blood_group": "B+",
+                "height_cm": 162,
+                "weight_kg": 65,
+                "profession": "Engineer",
+                "health_goals": ["bp", "weight"],
+                "mark_onboarding_complete": True,
+            },
+        )
+        self.assertEqual(updated.status_code, 200)
+        body = updated.json()["user"]
+        today = date.today()
+        expected_age = today.year - 1992 - (
+            1 if (today.month, today.day) < (3, 15) else 0
+        )
+        self.assertEqual(body["display_name"], "Priya Sharma")
+        self.assertEqual(body["profession"], "Engineer")
+        self.assertEqual(body["health_goals"], ["bp", "weight"])
+        self.assertEqual(body["age"], expected_age)
+        self.assertIsNotNone(body["onboarding_completed_at"])
+
+        out_of_range = self.client.put(
+            "/api/v1/auth/profile",
+            headers=self._headers(),
+            json={
+                "height_cm": 251,
+                "weight_kg": 201,
+            },
+        )
+        self.assertEqual(out_of_range.status_code, 422)
 
     def test_vitals_routes(self) -> None:
         create = self.client.post(
@@ -428,6 +482,52 @@ class TestApiRouteGroups(unittest.TestCase):
         self.assertEqual(family_list.status_code, 200)
         self.assertEqual(len(family_list.json()), 1)
         self.assertEqual(family_list.json()[0]["family_member_id"], member_id)
+
+        self_record = self.client.post(
+            "/api/v1/vault/records",
+            headers=self._headers(),
+            json={
+                "records": [
+                    {
+                        "record_type": "lab_report",
+                        "record_date": "2026-03-22",
+                        "title": "Self Lipid Profile",
+                    }
+                ]
+            },
+        )
+        self.assertEqual(self_record.status_code, 201)
+
+        member_record = self.client.post(
+            "/api/v1/vault/records",
+            headers=member_headers,
+            json={
+                "records": [
+                    {
+                        "record_type": "lab_report",
+                        "record_date": "2026-03-22",
+                        "title": "Family Glucose Report",
+                    }
+                ]
+            },
+        )
+        self.assertEqual(member_record.status_code, 201)
+
+        self_records = self.client.get(
+            "/api/v1/vault/records?page=1&limit=50",
+            headers=self._headers(),
+        )
+        self.assertEqual(self_records.status_code, 200)
+        self.assertEqual(self_records.json()["total"], 1)
+        self.assertIsNone(self_records.json()["records"][0]["family_member_id"])
+
+        family_records = self.client.get(
+            "/api/v1/vault/records?page=1&limit=50",
+            headers=member_headers,
+        )
+        self.assertEqual(family_records.status_code, 200)
+        self.assertEqual(family_records.json()["total"], 1)
+        self.assertEqual(family_records.json()["records"][0]["family_member_id"], member_id)
 
         bad_context = self.client.get(
             "/api/v1/vitals?limit=50&offset=0",

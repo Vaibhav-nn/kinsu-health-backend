@@ -8,9 +8,10 @@ from fastapi.responses import FileResponse
 from sqlalchemy import asc, desc, or_
 from sqlalchemy.orm import Session
 
-from app.api.deps import verify_firebase_token
+from app.api.deps import ProfileScope, get_current_user, get_profile_scope
 from app.core.config import settings
 from app.core.database import get_db
+from app.models.user import User
 from app.models.vault import HealthRecord
 from app.schemas.vault import (
     FileUploadConfirmation,
@@ -29,6 +30,20 @@ from app.services.storage import storage_service
 router = APIRouter(prefix="/vault", tags=["Vault"])
 
 
+def _scoped_records_query(
+    db: Session,
+    *,
+    user_id: int,
+    family_member_id: int | None,
+):
+    query = db.query(HealthRecord).filter(HealthRecord.user_id == user_id)
+    if family_member_id is None:
+        query = query.filter(HealthRecord.family_member_id.is_(None))
+    else:
+        query = query.filter(HealthRecord.family_member_id == family_member_id)
+    return query
+
+
 @router.get("/records", response_model=RecordListResponse)
 async def list_records(
     record_type: Optional[str] = None,
@@ -40,12 +55,17 @@ async def list_records(
     sort_order: Literal["asc", "desc"] = "desc",
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
-    _decoded_token: dict = Depends(verify_firebase_token),
+    user: User = Depends(get_current_user),
+    profile_scope: ProfileScope = Depends(get_profile_scope),
     db: Session = Depends(get_db),
 ) -> RecordListResponse:
     """List vault records with optional type filter."""
     offset = (page - 1) * limit
-    query = db.query(HealthRecord)
+    query = _scoped_records_query(
+        db,
+        user_id=user.id,
+        family_member_id=profile_scope.family_member_id,
+    )
 
     if record_type:
         query = query.filter(HealthRecord.record_type == record_type)
@@ -97,12 +117,15 @@ async def list_records(
 )
 async def create_records(
     body: RecordCreateBatch,
-    _decoded_token: dict = Depends(verify_firebase_token),
+    user: User = Depends(get_current_user),
+    profile_scope: ProfileScope = Depends(get_profile_scope),
     db: Session = Depends(get_db),
 ) -> UploadRecordsResponse:
     """Create one or more record metadata entries."""
     records = [
         HealthRecord(
+            user_id=user.id,
+            family_member_id=profile_scope.family_member_id,
             record_type=item.record_type,
             record_date=item.record_date,
             title=item.title,
@@ -122,7 +145,8 @@ async def create_records(
 @router.post("/records/upload-url", response_model=PresignedUploadResponse)
 async def get_upload_url(
     body: PresignedUploadRequest,
-    _decoded_token: dict = Depends(verify_firebase_token),
+    user: User = Depends(get_current_user),
+    profile_scope: ProfileScope = Depends(get_profile_scope),
     db: Session = Depends(get_db),
 ) -> PresignedUploadResponse:
     """Generate a presigned upload URL (S3 mode only)."""
@@ -135,7 +159,15 @@ async def get_upload_url(
             ),
         )
 
-    record = db.query(HealthRecord).filter(HealthRecord.id == body.record_id).first()
+    record = (
+        _scoped_records_query(
+            db,
+            user_id=user.id,
+            family_member_id=profile_scope.family_member_id,
+        )
+        .filter(HealthRecord.id == body.record_id)
+        .first()
+    )
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Health record not found.")
 
@@ -153,6 +185,7 @@ async def get_upload_url(
 
     return PresignedUploadResponse(
         presigned_url=presigned_data["presigned_url"],
+        upload_url=presigned_data["presigned_url"],
         s3_key=presigned_data["s3_key"],
         expires_in=settings.S3_PRESIGNED_URL_EXPIRATION,
     )
@@ -161,7 +194,8 @@ async def get_upload_url(
 @router.post("/records/confirm-upload", response_model=FileUploadConfirmationResponse)
 async def confirm_upload(
     body: FileUploadConfirmation,
-    _decoded_token: dict = Depends(verify_firebase_token),
+    user: User = Depends(get_current_user),
+    profile_scope: ProfileScope = Depends(get_profile_scope),
     db: Session = Depends(get_db),
 ) -> FileUploadConfirmationResponse:
     """Confirm uploaded file metadata (S3 mode only)."""
@@ -174,7 +208,15 @@ async def confirm_upload(
             ),
         )
 
-    record = db.query(HealthRecord).filter(HealthRecord.id == body.record_id).first()
+    record = (
+        _scoped_records_query(
+            db,
+            user_id=user.id,
+            family_member_id=profile_scope.family_member_id,
+        )
+        .filter(HealthRecord.id == body.record_id)
+        .first()
+    )
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Health record not found.")
 
@@ -210,11 +252,20 @@ async def confirm_upload(
 async def upload_file_direct(
     record_id: str,
     file: UploadFile = File(...),
-    _decoded_token: dict = Depends(verify_firebase_token),
+    user: User = Depends(get_current_user),
+    profile_scope: ProfileScope = Depends(get_profile_scope),
     db: Session = Depends(get_db),
 ) -> FileUploadResponse:
     """Upload a file directly and attach it to a record (local mode)."""
-    record = db.query(HealthRecord).filter(HealthRecord.id == record_id).first()
+    record = (
+        _scoped_records_query(
+            db,
+            user_id=user.id,
+            family_member_id=profile_scope.family_member_id,
+        )
+        .filter(HealthRecord.id == record_id)
+        .first()
+    )
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Health record not found.")
 
@@ -246,11 +297,20 @@ async def upload_file_direct(
 @router.get("/records/{record_id}", response_model=RecordResponse)
 async def get_record(
     record_id: str,
-    _decoded_token: dict = Depends(verify_firebase_token),
+    user: User = Depends(get_current_user),
+    profile_scope: ProfileScope = Depends(get_profile_scope),
     db: Session = Depends(get_db),
 ) -> RecordResponse:
     """Get one record by id."""
-    record = db.query(HealthRecord).filter(HealthRecord.id == record_id).first()
+    record = (
+        _scoped_records_query(
+            db,
+            user_id=user.id,
+            family_member_id=profile_scope.family_member_id,
+        )
+        .filter(HealthRecord.id == record_id)
+        .first()
+    )
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Health record not found.")
     return RecordResponse.model_validate(record)
@@ -259,11 +319,20 @@ async def get_record(
 @router.delete("/records/{record_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_record(
     record_id: str,
-    _decoded_token: dict = Depends(verify_firebase_token),
+    user: User = Depends(get_current_user),
+    profile_scope: ProfileScope = Depends(get_profile_scope),
     db: Session = Depends(get_db),
 ) -> None:
     """Delete one record by id."""
-    record = db.query(HealthRecord).filter(HealthRecord.id == record_id).first()
+    record = (
+        _scoped_records_query(
+            db,
+            user_id=user.id,
+            family_member_id=profile_scope.family_member_id,
+        )
+        .filter(HealthRecord.id == record_id)
+        .first()
+    )
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Health record not found.")
     db.delete(record)
@@ -274,7 +343,9 @@ async def delete_record(
 async def download_file(
     record_id: str,
     filename: str,
-    _decoded_token: dict = Depends(verify_firebase_token),
+    user: User = Depends(get_current_user),
+    profile_scope: ProfileScope = Depends(get_profile_scope),
+    db: Session = Depends(get_db),
 ):
     """Download a locally stored file by record and filename."""
     if settings.STORAGE_BACKEND != "local":
@@ -282,6 +353,20 @@ async def download_file(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
             detail="Direct file download is only supported with local storage.",
         )
+
+    record = (
+        _scoped_records_query(
+            db,
+            user_id=user.id,
+            family_member_id=profile_scope.family_member_id,
+        )
+        .filter(HealthRecord.id == record_id)
+        .first()
+    )
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Health record not found.")
+    if record.file_name != filename:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found.")
 
     relative_path = f"{record_id}/{filename}"
     if not storage_service.verify_file_exists(relative_path):

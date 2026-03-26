@@ -5,10 +5,10 @@ auto-increment `id` serves as the primary key for foreign-key relationships
 in other tables.
 """
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Optional
 
-from sqlalchemy import DateTime, Integer, String
+from sqlalchemy import JSON, Date, DateTime, Float, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -25,6 +25,28 @@ class User(Base):
     )
     email: Mapped[str] = mapped_column(String(256), unique=True, nullable=False)
     display_name: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    photo_url: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    gender: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    date_of_birth: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    age: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    blood_group: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    height_cm: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    weight_kg: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    profession: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    health_goals: Mapped[Optional[list[str]]] = mapped_column(JSON, nullable=True)
+    consent_accepted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    onboarding_completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    auth_provider: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

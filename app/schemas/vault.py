@@ -17,6 +17,7 @@ class RecordCreateBatch(BaseModel):
 
 class RecordResponse(BaseModel):
     id: str
+    family_member_id: Optional[int]
     record_type: str
     record_date: date
     title: str
@@ -42,6 +43,7 @@ class PresignedUploadRequest(BaseModel):
 
 class PresignedUploadResponse(BaseModel):
     presigned_url: str
+    upload_url: str
     s3_key: str
     expires_in: int
 
