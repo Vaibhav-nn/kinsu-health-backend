@@ -167,12 +167,29 @@ class TestApiRouteGroups(unittest.TestCase):
         self.assertEqual(listed.status_code, 200)
         self.assertEqual(len(listed.json()), 1)
 
+        snapshot = self.client.post(
+            "/api/v1/vitals/snapshot",
+            headers=self._headers(),
+            json={
+                "recorded_at": "2026-03-21T10:00:00Z",
+                "blood_pressure_systolic": 128,
+                "blood_pressure_diastolic": 84,
+                "blood_sugar": 142,
+            },
+        )
+        self.assertEqual(snapshot.status_code, 201)
+        self.assertEqual(len(snapshot.json()), 2)
+
         trends = self.client.get(
             "/api/v1/vitals/trends?vital_type=heart_rate",
             headers=self._headers(),
         )
         self.assertEqual(trends.status_code, 200)
         self.assertEqual(trends.json()["count"], 1)
+
+        today_cards = self.client.get("/api/v1/vitals/today-cards", headers=self._headers())
+        self.assertEqual(today_cards.status_code, 200)
+        self.assertGreaterEqual(len(today_cards.json()), 6)
 
         get_one = self.client.get(f"/api/v1/vitals/{vital_id}", headers=self._headers())
         self.assertEqual(get_one.status_code, 200)
@@ -201,6 +218,21 @@ class TestApiRouteGroups(unittest.TestCase):
         listed = self.client.get("/api/v1/symptoms?limit=50&offset=0", headers=self._headers())
         self.assertEqual(listed.status_code, 200)
         self.assertEqual(len(listed.json()), 1)
+
+        quick_log = self.client.post(
+            "/api/v1/symptoms/quick-log",
+            headers=self._headers(),
+            json={
+                "symptom_name": "fatigue",
+                "severity": 5,
+                "notes": "Afternoon dip",
+            },
+        )
+        self.assertEqual(quick_log.status_code, 201)
+
+        dashboard = self.client.get("/api/v1/symptoms/dashboard", headers=self._headers())
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertGreaterEqual(len(dashboard.json()), 1)
 
         updated = self.client.put(
             f"/api/v1/symptoms/{symptom_id}",
@@ -246,6 +278,10 @@ class TestApiRouteGroups(unittest.TestCase):
         self.assertEqual(listed.status_code, 200)
         self.assertEqual(len(listed.json()), 1)
 
+        dashboard = self.client.get("/api/v1/illness/dashboard", headers=self._headers())
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertEqual(len(dashboard.json()), 1)
+
         delete = self.client.delete(f"/api/v1/illness/{episode_id}", headers=self._headers())
         self.assertEqual(delete.status_code, 204)
 
@@ -270,6 +306,42 @@ class TestApiRouteGroups(unittest.TestCase):
         listed = self.client.get("/api/v1/medications?limit=50&offset=0", headers=self._headers())
         self.assertEqual(listed.status_code, 200)
         self.assertEqual(len(listed.json()), 1)
+
+        dose = self.client.post(
+            f"/api/v1/medications/{med_id}/doses",
+            headers=self._headers(),
+            json={
+                "scheduled_for": "2026-03-21",
+                "scheduled_time": "09:00:00",
+                "status": "taken",
+                "taken_at": "2026-03-21T09:05:00Z",
+            },
+        )
+        self.assertEqual(dose.status_code, 201)
+
+        overwritten = self.client.post(
+            f"/api/v1/medications/{med_id}/doses",
+            headers=self._headers(),
+            json={
+                "scheduled_for": "2026-03-21",
+                "scheduled_time": "09:00:00",
+                "status": "missed",
+            },
+        )
+        self.assertEqual(overwritten.status_code, 201)
+        self.assertEqual(overwritten.json()["id"], dose.json()["id"])
+        self.assertEqual(overwritten.json()["status"], "missed")
+
+        dashboard = self.client.get("/api/v1/medications/dashboard", headers=self._headers())
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertGreaterEqual(len(dashboard.json()["items"]), 1)
+
+        adherence = self.client.get(
+            "/api/v1/medications/adherence?view=weekly",
+            headers=self._headers(),
+        )
+        self.assertEqual(adherence.status_code, 200)
+        self.assertEqual(adherence.json()["view"], "weekly")
 
         updated = self.client.put(
             f"/api/v1/medications/{med_id}",
@@ -318,6 +390,152 @@ class TestApiRouteGroups(unittest.TestCase):
         delete = self.client.delete(f"/api/v1/reminders/{reminder_id}", headers=self._headers())
         self.assertEqual(delete.status_code, 204)
 
+    def test_homescreen_dashboard_routes(self) -> None:
+        self.client.post("/api/v1/auth/login", headers=self._headers())
+        self.client.post(
+            "/api/v1/medications",
+            headers=self._headers(),
+            json={
+                "name": "Amlodipine",
+                "dosage": "5mg",
+                "frequency": "once_daily",
+                "route": "oral",
+                "start_date": "2026-03-01",
+                "prescribing_doctor": "Dr. Reddy",
+                "is_active": True,
+            },
+        )
+        self.client.post(
+            "/api/v1/vault/records",
+            headers=self._headers(),
+            json={
+                "records": [
+                    {
+                        "record_type": "lab_report",
+                        "record_date": "2026-03-20",
+                        "title": "CBC",
+                        "provider_name": "Apollo Hospital",
+                    }
+                ]
+            },
+        )
+        self.client.post(
+            "/api/v1/appointments",
+            headers=self._headers(),
+            json={
+                "doctor_name": "Dr. Kapoor",
+                "specialty": "Cardiology",
+                "appointment_at": "2026-03-25T10:30:00Z",
+                "location": "Apollo Hospital",
+            },
+        )
+        self.client.post(
+            "/api/v1/homescreen/notifications",
+            headers=self._headers(),
+            json={
+                "title": "AI Health Insight",
+                "body": "Blood sugar has been above 140 this week.",
+                "notification_type": "ai",
+            },
+        )
+
+        overview = self.client.get("/api/v1/homescreen/overview", headers=self._headers())
+        self.assertEqual(overview.status_code, 200)
+
+        dashboard = self.client.get("/api/v1/homescreen/dashboard", headers=self._headers())
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertEqual(len(dashboard.json()["appointments"]), 1)
+        self.assertEqual(len(dashboard.json()["recent_records"]), 1)
+
+        search = self.client.get("/api/v1/homescreen/search?q=Apollo", headers=self._headers())
+        self.assertEqual(search.status_code, 200)
+        sections = {item["section"] for item in search.json()["results"]}
+        self.assertIn("records", sections)
+        self.assertIn("appointments", sections)
+
+        notifications = self.client.get("/api/v1/homescreen/notifications", headers=self._headers())
+        self.assertEqual(notifications.status_code, 200)
+        self.assertGreaterEqual(len(notifications.json()), 1)
+
+    def test_family_dashboard_routes(self) -> None:
+        login = self.client.post("/api/v1/auth/login", headers=self._headers())
+        self.assertEqual(login.status_code, 200)
+
+        created = self.client.post(
+            "/api/v1/family/members",
+            headers=self._headers(),
+            json={
+                "display_name": "Lakshmi Sharma",
+                "phone_e164": "+919999999999",
+                "relation": "Mother",
+                "date_of_birth": "1964-07-10",
+                "blood_group": "A+",
+                "health_conditions": ["type_2_diabetes", "thyroid"],
+            },
+        )
+        self.assertEqual(created.status_code, 201)
+        member_id = created.json()["id"]
+
+        profiles = self.client.get("/api/v1/family/profiles", headers=self._headers())
+        self.assertEqual(profiles.status_code, 200)
+        self.assertGreaterEqual(len(profiles.json()), 2)
+
+        dashboard = self.client.get("/api/v1/family/dashboard", headers=self._headers())
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertGreaterEqual(len(dashboard.json()), 2)
+
+        permissions = self.client.get(
+            f"/api/v1/family/members/{member_id}/permissions",
+            headers=self._headers(),
+        )
+        self.assertEqual(permissions.status_code, 200)
+        self.assertGreaterEqual(len(permissions.json()), 1)
+
+    def test_exercise_routes(self) -> None:
+        self.client.post("/api/v1/auth/login", headers=self._headers())
+
+        catalog = self.client.get("/api/v1/exercise/catalog", headers=self._headers())
+        self.assertEqual(catalog.status_code, 200)
+        self.assertGreaterEqual(len(catalog.json()), 1)
+
+        created = self.client.post(
+            "/api/v1/exercise/logs",
+            headers=self._headers(),
+            json={
+                "category": "walk_run",
+                "activity_name": "Brisk Walking",
+                "duration_minutes": 30,
+                "distance_km": 2.5,
+            },
+        )
+        self.assertEqual(created.status_code, 201)
+        activity_id = created.json()["id"]
+
+        listed = self.client.get("/api/v1/exercise/logs", headers=self._headers())
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(len(listed.json()), 1)
+
+        summary = self.client.get("/api/v1/exercise/summary", headers=self._headers())
+        self.assertEqual(summary.status_code, 200)
+        self.assertEqual(summary.json()["activities_done"], 1)
+
+        history = self.client.get("/api/v1/exercise/history", headers=self._headers())
+        self.assertEqual(history.status_code, 200)
+        self.assertIn("weekly_calories", history.json())
+
+        recommendations = self.client.get(
+            "/api/v1/exercise/recommendations",
+            headers=self._headers(),
+        )
+        self.assertEqual(recommendations.status_code, 200)
+        self.assertGreaterEqual(len(recommendations.json()["items"]), 1)
+
+        delete = self.client.delete(
+            f"/api/v1/exercise/logs/{activity_id}",
+            headers=self._headers(),
+        )
+        self.assertEqual(delete.status_code, 204)
+
     def test_vault_routes(self) -> None:
         created = self.client.post(
             "/api/v1/vault/records",
@@ -356,6 +574,12 @@ class TestApiRouteGroups(unittest.TestCase):
         self.assertEqual(listed.status_code, 200)
         self.assertEqual(listed.json()["total"], 2)
 
+        connected_services = self.client.get(
+            "/api/v1/vault/connected-services",
+            headers=self._headers(),
+        )
+        self.assertEqual(connected_services.status_code, 200)
+
         get_one = self.client.get(f"/api/v1/vault/records/{record_id}", headers=self._headers())
         self.assertEqual(get_one.status_code, 200)
 
@@ -373,6 +597,14 @@ class TestApiRouteGroups(unittest.TestCase):
         )
         self.assertEqual(filtered_dates.status_code, 200)
         self.assertEqual(filtered_dates.json()["total"], 1)
+
+        lab_trend = self.client.get(
+            "/api/v1/vault/lab-parameters/trends?parameter_key=hemoglobin",
+            headers=self._headers(),
+        )
+        self.assertEqual(lab_trend.status_code, 200)
+        self.assertEqual(lab_trend.json()["parameter_key"], "hemoglobin")
+        self.assertIn("history", lab_trend.json())
 
         upload_url = self.client.post(
             "/api/v1/vault/records/upload-url",
@@ -529,11 +761,84 @@ class TestApiRouteGroups(unittest.TestCase):
         self.assertEqual(family_records.json()["total"], 1)
         self.assertEqual(family_records.json()["records"][0]["family_member_id"], member_id)
 
+        family_dashboard = self.client.get("/api/v1/family/dashboard", headers=self._headers())
+        self.assertEqual(family_dashboard.status_code, 200)
+        self.assertEqual(len(family_dashboard.json()), 2)
+
+        permissions = self.client.get(
+            f"/api/v1/family/members/{member_id}/permissions",
+            headers=self._headers(),
+        )
+        self.assertEqual(permissions.status_code, 200)
+        self.assertGreaterEqual(len(permissions.json()), 1)
+
+        updated_permissions = self.client.put(
+            f"/api/v1/family/members/{member_id}/permissions",
+            headers=self._headers(),
+            json=[{"permission_key": "receive_sos", "is_enabled": False}],
+        )
+        self.assertEqual(updated_permissions.status_code, 200)
+
         bad_context = self.client.get(
             "/api/v1/vitals?limit=50&offset=0",
             headers={**self._headers(), "X-Profile-Id": "9999"},
         )
         self.assertEqual(bad_context.status_code, 404)
+
+    def test_appointments_and_exercise_routes(self) -> None:
+        appointment = self.client.post(
+            "/api/v1/appointments",
+            headers=self._headers(),
+            json={
+                "doctor_name": "Dr. Mehta",
+                "specialty": "Endocrinology",
+                "appointment_at": "2026-03-30T14:00:00Z",
+                "location": "Max Hospital",
+                "status": "scheduled",
+            },
+        )
+        self.assertEqual(appointment.status_code, 201)
+        appointment_id = appointment.json()["id"]
+
+        listed = self.client.get("/api/v1/appointments", headers=self._headers())
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(len(listed.json()), 1)
+
+        updated = self.client.put(
+            f"/api/v1/appointments/{appointment_id}",
+            headers=self._headers(),
+            json={"status": "completed"},
+        )
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json()["status"], "completed")
+
+        catalog = self.client.get("/api/v1/exercise/catalog", headers=self._headers())
+        self.assertEqual(catalog.status_code, 200)
+        self.assertGreaterEqual(len(catalog.json()), 1)
+
+        logged = self.client.post(
+            "/api/v1/exercise/logs",
+            headers=self._headers(),
+            json={
+                "category": "walk_run",
+                "activity_name": "Brisk Walking",
+                "duration_minutes": 30,
+                "distance_km": 2.5,
+            },
+        )
+        self.assertEqual(logged.status_code, 201)
+
+        summary = self.client.get("/api/v1/exercise/summary", headers=self._headers())
+        self.assertEqual(summary.status_code, 200)
+        self.assertEqual(summary.json()["activities_done"], 1)
+
+        history = self.client.get("/api/v1/exercise/history", headers=self._headers())
+        self.assertEqual(history.status_code, 200)
+        self.assertEqual(len(history.json()["weekly_calories"]), 7)
+
+        recommendations = self.client.get("/api/v1/exercise/recommendations", headers=self._headers())
+        self.assertEqual(recommendations.status_code, 200)
+        self.assertGreaterEqual(len(recommendations.json()["items"]), 1)
 
 
 if __name__ == "__main__":

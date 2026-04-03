@@ -21,6 +21,8 @@ from app.api.v1.illness import router as illness_router
 from app.api.v1.medications import router as medications_router
 from app.api.v1.reminders import router as reminders_router
 from app.api.v1.homescreen import router as homescreen_router
+from app.api.v1.appointments import router as appointments_router
+from app.api.v1.exercise import router as exercise_router
 from app.api.v1.vault import router as vault_router
 from app.api.v1.family import router as family_router
 
@@ -79,6 +81,8 @@ app.include_router(illness_router, prefix=settings.API_V1_PREFIX)
 app.include_router(medications_router, prefix=settings.API_V1_PREFIX)
 app.include_router(reminders_router, prefix=settings.API_V1_PREFIX)
 app.include_router(homescreen_router, prefix=settings.API_V1_PREFIX)
+app.include_router(appointments_router, prefix=settings.API_V1_PREFIX)
+app.include_router(exercise_router, prefix=settings.API_V1_PREFIX)
 app.include_router(vault_router, prefix=settings.API_V1_PREFIX)
 app.include_router(family_router, prefix=settings.API_V1_PREFIX)
 

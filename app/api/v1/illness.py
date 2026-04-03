@@ -6,11 +6,13 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session, joinedload
 
+from app.api.v1._utils import apply_profile_scope
 from app.api.deps import ProfileScope, get_current_user, get_profile_scope
 from app.core.database import get_db
 from app.models.illness import IllnessDetail, IllnessEpisode
 from app.models.user import User
 from app.schemas.health import (
+    IllnessDashboardCard,
     IllnessDetailCreate,
     IllnessDetailResponse,
     IllnessEpisodeCreate,
@@ -64,6 +66,48 @@ async def list_episodes(
 
     episodes = query.order_by(IllnessEpisode.start_date.desc()).offset(offset).limit(limit).all()
     return [IllnessEpisodeResponse.model_validate(e) for e in episodes]
+
+
+@router.get("/dashboard", response_model=list[IllnessDashboardCard])
+async def illness_dashboard(
+    user: User = Depends(get_current_user),
+    profile_scope: ProfileScope = Depends(get_profile_scope),
+    db: Session = Depends(get_db),
+) -> list[IllnessDashboardCard]:
+    episodes = (
+        apply_profile_scope(
+            db.query(IllnessEpisode).options(joinedload(IllnessEpisode.details)),
+            IllnessEpisode,
+            user_id=user.id,
+            family_member_id=profile_scope.family_member_id,
+        )
+        .order_by(IllnessEpisode.updated_at.desc())
+        .all()
+    )
+    cards: list[IllnessDashboardCard] = []
+    for episode in episodes:
+        detail_items = list(episode.details or [])
+        tags = [
+            item.content
+            for item in detail_items
+            if item.detail_type in {"symptom", "diagnosis"}
+        ][:3]
+        if episode.end_date:
+            subtitle = f"{episode.start_date.strftime('%-d %b %Y')} - {episode.end_date.strftime('%-d %b %Y')}"
+        else:
+            subtitle = f"Ongoing since {episode.start_date.strftime('%b %Y')}"
+        cards.append(
+            IllnessDashboardCard(
+                id=episode.id,
+                title=episode.title,
+                subtitle=subtitle,
+                status=episode.status,
+                tags=tags,
+                consult_count=sum(1 for item in detail_items if item.detail_type == "consult"),
+                report_count=sum(1 for item in detail_items if item.detail_type == "report"),
+            )
+        )
+    return cards
 
 
 @router.get("/{episode_id}", response_model=IllnessEpisodeDetailedResponse)

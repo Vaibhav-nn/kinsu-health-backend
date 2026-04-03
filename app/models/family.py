@@ -3,7 +3,7 @@
 from datetime import date, datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -28,6 +28,8 @@ class FamilyMember(Base):
     phone_e164: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     relation: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     date_of_birth: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    blood_group: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    health_conditions: Mapped[Optional[list[str]]] = mapped_column(JSON, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(

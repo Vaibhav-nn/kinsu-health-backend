@@ -96,6 +96,11 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    appointments: Mapped[list["Appointment"]] = relationship(
+        "Appointment",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
     family_members: Mapped[list["FamilyMember"]] = relationship(
         "FamilyMember",
         back_populates="owner",

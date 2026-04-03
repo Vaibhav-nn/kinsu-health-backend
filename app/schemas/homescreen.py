@@ -108,11 +108,80 @@ class HomeOverviewResponse(BaseModel):
     bottom_nav: list[HomeBottomNavItem]
 
 
+class HomeAppointmentCard(BaseModel):
+    id: int
+    doctor_name: str
+    specialty: Optional[str] = None
+    appointment_at: datetime
+    location: Optional[str] = None
+    status: str
+    notes: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+class AppointmentCreate(BaseModel):
+    doctor_name: str = Field(..., min_length=1, max_length=255)
+    specialty: Optional[str] = Field(default=None, max_length=128)
+    appointment_at: datetime
+    location: Optional[str] = Field(default=None, max_length=255)
+    status: str = Field(default="scheduled", max_length=32)
+    notes: Optional[str] = None
+
+
+class AppointmentUpdate(BaseModel):
+    doctor_name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    specialty: Optional[str] = Field(default=None, max_length=128)
+    appointment_at: Optional[datetime] = None
+    location: Optional[str] = Field(default=None, max_length=255)
+    status: Optional[str] = Field(default=None, max_length=32)
+    notes: Optional[str] = None
+
+
+class HomeMedicationItem(BaseModel):
+    id: int
+    name: str
+    dosage: str
+    subtitle: str
+    status: Literal["taken", "missed", "pending"]
+    scheduled_label: Optional[str] = None
+
+
+class HomeInsightCard(BaseModel):
+    key: str
+    title: str
+    metric: str
+    delta_label: str
+    summary: str
+    trend: Literal["up", "down", "flat"]
+
+
+class HomeRecentRecordCard(BaseModel):
+    id: str
+    title: str
+    subtitle: str
+    record_type: str
+    record_date: datetime
+
+
+class HomeDashboardResponse(BaseModel):
+    streak_day: int
+    ai_alert: Optional[HomeNotificationResponse] = None
+    appointments: list[HomeAppointmentCard]
+    medications_taken: int
+    medications_missed: int
+    medications_left: int
+    medication_items: list[HomeMedicationItem]
+    insights: list[HomeInsightCard]
+    recent_records: list[HomeRecentRecordCard]
+    notifications: list[HomeNotificationResponse]
+
+
 class HomeSearchResultItem(BaseModel):
     """Search result item across homescreen-backed resources."""
 
     section: str
-    item_id: int
+    item_id: str
     title: str
     subtitle: str
     route: str

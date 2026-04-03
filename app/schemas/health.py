@@ -4,7 +4,7 @@ Grouped by feature: Vitals, Symptoms, Illness, Medications, Reminders.
 """
 
 from datetime import date, datetime, time
-from typing import Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -61,6 +61,26 @@ class VitalTrendResponse(BaseModel):
     max_value: Optional[float] = None
 
 
+class VitalSnapshotCreate(BaseModel):
+    recorded_at: datetime
+    notes: Optional[str] = None
+    blood_pressure_systolic: Optional[float] = None
+    blood_pressure_diastolic: Optional[float] = None
+    blood_sugar: Optional[float] = None
+    heart_rate: Optional[float] = None
+    weight: Optional[float] = None
+    temperature: Optional[float] = None
+    spo2: Optional[float] = None
+
+
+class VitalTodayCard(BaseModel):
+    vital_type: str
+    label: str
+    latest_value: str
+    unit: str
+    delta_label: str
+
+
 # ══════════════════════════════════════════════════════════
 #  CHRONIC SYMPTOMS
 # ══════════════════════════════════════════════════════════
@@ -109,6 +129,38 @@ class SymptomResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class SymptomEventCreate(BaseModel):
+    symptom_name: str
+    severity: int = Field(..., ge=1, le=10)
+    notes: Optional[str] = None
+    occurred_at: Optional[datetime] = None
+
+
+class SymptomEventResponse(BaseModel):
+    id: int
+    symptom_name: str
+    severity: int
+    notes: Optional[str] = None
+    occurred_at: datetime
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SymptomWeeklyPattern(BaseModel):
+    weekday: str
+    count: int
+
+
+class SymptomDashboardItem(BaseModel):
+    symptom_name: str
+    severity_label: str
+    frequency_label: str
+    trend: Literal["improving", "stable", "worsening"]
+    pattern: list[SymptomWeeklyPattern]
 
 
 # ══════════════════════════════════════════════════════════
@@ -175,7 +227,17 @@ class IllnessEpisodeResponse(BaseModel):
 class IllnessEpisodeDetailedResponse(IllnessEpisodeResponse):
     """Illness episode with all detail entries (detailed view)."""
 
-    details: list[IllnessDetailResponse] = []
+    details: list[IllnessDetailResponse] = Field(default_factory=list)
+
+
+class IllnessDashboardCard(BaseModel):
+    id: int
+    title: str
+    subtitle: str
+    status: str
+    tags: list[str]
+    consult_count: int = 0
+    report_count: int = 0
 
 
 # ══════════════════════════════════════════════════════════
@@ -231,6 +293,60 @@ class MedicationResponse(BaseModel):
         from_attributes = True
 
 
+class MedicationDoseLogCreate(BaseModel):
+    scheduled_for: date
+    scheduled_time: Optional[time] = None
+    status: Literal["taken", "missed", "pending"]
+    taken_at: Optional[datetime] = None
+    notes: Optional[str] = None
+
+
+class MedicationDoseLogResponse(BaseModel):
+    id: int
+    medication_id: int
+    scheduled_for: date
+    scheduled_time: Optional[time] = None
+    status: str
+    taken_at: Optional[datetime] = None
+    notes: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class MedicationDashboardItem(BaseModel):
+    medication: MedicationResponse
+    adherence_pct: int
+    latest_status: Literal["taken", "missed", "pending"]
+    schedule_label: Optional[str] = None
+
+
+class MedicationDashboardResponse(BaseModel):
+    taken: int
+    missed: int
+    left: int
+    adherence_pct: int
+    items: list[MedicationDashboardItem]
+
+
+class MedicationWeeklyMatrixEntry(BaseModel):
+    medication_id: int
+    medication_name: str
+    dosage: str
+    day_statuses: list[str]
+
+
+class MedicationMonthlyCalendarDay(BaseModel):
+    day: int
+    adherence_bucket: Literal["high", "medium", "low", "none"]
+
+
+class MedicationAdherenceResponse(BaseModel):
+    view: Literal["daily", "weekly", "monthly"]
+    weekly_rows: list[MedicationWeeklyMatrixEntry] = Field(default_factory=list)
+    monthly_days: list[MedicationMonthlyCalendarDay] = Field(default_factory=list)
+
+
 # ══════════════════════════════════════════════════════════
 #  REMINDERS
 # ══════════════════════════════════════════════════════════
@@ -276,3 +392,72 @@ class ReminderResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ActivityLogCreate(BaseModel):
+    category: str
+    activity_name: str
+    duration_minutes: int = Field(..., ge=1, le=1440)
+    calories_burned: Optional[int] = Field(default=None, ge=0)
+    distance_km: Optional[float] = Field(default=None, ge=0)
+    details: Optional[dict[str, Any]] = None
+    logged_at: Optional[datetime] = None
+
+
+class ActivityLogResponse(BaseModel):
+    id: int
+    category: str
+    activity_name: str
+    duration_minutes: int
+    calories_burned: int
+    distance_km: Optional[float] = None
+    details: Optional[dict[str, Any]] = None
+    logged_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ActivitySummaryResponse(BaseModel):
+    calories: int
+    duration_minutes: int
+    activities_done: int
+    today: list[ActivityLogResponse]
+
+
+class ActivityHistoryBar(BaseModel):
+    weekday: str
+    calories: int
+
+
+class ActivityHistoryResponse(BaseModel):
+    weekly_calories: list[ActivityHistoryBar]
+    active_days: int
+    total_weekly_calories: int
+
+
+class ActivityRecommendationItem(BaseModel):
+    title: str
+    subtitle: str
+    duration_minutes: int
+    recommendation_reason: str
+    risk_level: str
+
+
+class ActivityRecommendationResponse(BaseModel):
+    summary: str
+    items: list[ActivityRecommendationItem]
+
+
+class ActivityCatalogItem(BaseModel):
+    category: str
+    activity_name: str
+    estimated_calories: int
+    duration_minutes: int
+    fields: list[str] = Field(default_factory=list)
+
+
+class ActivityCatalogSection(BaseModel):
+    category: str
+    title: str
+    items: list[ActivityCatalogItem] = Field(default_factory=list)

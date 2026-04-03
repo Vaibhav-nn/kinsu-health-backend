@@ -20,6 +20,8 @@ class FamilyMemberCreate(BaseModel):
     phone_e164: str = Field(..., min_length=8, max_length=32)
     relation: Optional[str] = Field(default=None, max_length=64)
     date_of_birth: Optional[date] = None
+    blood_group: Optional[str] = Field(default=None, max_length=8)
+    health_conditions: Optional[list[str]] = None
     notes: Optional[str] = None
 
     @field_validator("phone_e164")
@@ -36,6 +38,8 @@ class FamilyMemberUpdate(BaseModel):
     phone_e164: Optional[str] = Field(default=None, min_length=8, max_length=32)
     relation: Optional[str] = Field(default=None, max_length=64)
     date_of_birth: Optional[date] = None
+    blood_group: Optional[str] = Field(default=None, max_length=8)
+    health_conditions: Optional[list[str]] = None
     notes: Optional[str] = None
     is_active: Optional[bool] = None
 
@@ -56,6 +60,8 @@ class FamilyMemberResponse(BaseModel):
     phone_e164: str
     relation: Optional[str] = None
     date_of_birth: Optional[date] = None
+    blood_group: Optional[str] = None
+    health_conditions: Optional[list[str]] = None
     notes: Optional[str] = None
     is_active: bool
     created_at: datetime
@@ -63,6 +69,33 @@ class FamilyMemberResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class FamilyDashboardCard(BaseModel):
+    profile_type: Literal["self", "family_member"]
+    profile_id: Optional[int] = None
+    display_name: str
+    relation: str
+    age: Optional[int] = None
+    blood_group: Optional[str] = None
+    initials: str
+    health_conditions: list[str] = Field(default_factory=list)
+    record_count: int = 0
+    medication_count: int = 0
+    last_activity: str = "No activity yet"
+    is_active_context: bool = False
+
+
+class CaregiverPermissionResponse(BaseModel):
+    permission_key: str
+    label: str
+    description: str
+    is_enabled: bool
+
+
+class CaregiverPermissionUpdate(BaseModel):
+    permission_key: str
+    is_enabled: bool
 
 
 class AccountProfileOption(BaseModel):

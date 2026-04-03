@@ -6,8 +6,11 @@ from pydantic import BaseModel, Field
 
 class RecordCreate(BaseModel):
     record_type: str
+    document_subtype: Optional[str] = None
     record_date: date
     title: str
+    provider_name: Optional[str] = None
+    tags: Optional[list[str]] = None
     notes: Optional[str] = None
 
 
@@ -19,8 +22,11 @@ class RecordResponse(BaseModel):
     id: str
     family_member_id: Optional[int]
     record_type: str
+    document_subtype: Optional[str]
     record_date: date
     title: str
+    provider_name: Optional[str]
+    tags: Optional[list[str]]
     notes: Optional[str]
     file_name: Optional[str]
     file_url: Optional[str]
@@ -72,3 +78,41 @@ class RecordListResponse(BaseModel):
     total: int
     page: int
     limit: int
+
+
+class ConnectedServiceResponse(BaseModel):
+    id: int
+    provider_name: str
+    provider_type: str
+    status: str
+    record_count: int
+    synced_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class ConnectedServiceUpsert(BaseModel):
+    provider_name: str
+    provider_type: str
+    status: str = "pending"
+
+
+class LabTrendPoint(BaseModel):
+    observed_on: date
+    value: float
+
+
+class LabTrendHistoryItem(BaseModel):
+    observed_on: date
+    value: float
+    unit: str
+
+
+class LabParameterTrendResponse(BaseModel):
+    parameter_key: str
+    parameter_label: str
+    unit: str
+    latest_value: Optional[float] = None
+    status: Optional[str] = None
+    data_points: list[LabTrendPoint]
+    history: list[LabTrendHistoryItem]

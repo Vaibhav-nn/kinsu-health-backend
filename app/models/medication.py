@@ -83,6 +83,12 @@ class Medication(Base):
         back_populates="medication",
         passive_deletes=True,
     )
+    dose_logs: Mapped[list["MedicationDoseLog"]] = relationship(
+        "MedicationDoseLog",
+        back_populates="medication",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     def __repr__(self) -> str:
         return f"<Medication(id={self.id}, name='{self.name}')>"

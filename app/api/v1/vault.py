@@ -1,22 +1,29 @@
-"""Vault endpoints for records and file uploads."""
+"""Vault endpoints for records, filters, connected services, and lab trends."""
 
 from datetime import date, datetime, timezone
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
-from sqlalchemy import asc, desc, or_
+from sqlalchemy import String, asc, cast, desc, func, or_
 from sqlalchemy.orm import Session
 
 from app.api.deps import ProfileScope, get_current_user, get_profile_scope
 from app.core.config import settings
 from app.core.database import get_db
+from app.models.connected_service import ConnectedService
+from app.models.lab_parameter import LabParameterResult
 from app.models.user import User
 from app.models.vault import HealthRecord
 from app.schemas.vault import (
+    ConnectedServiceResponse,
+    ConnectedServiceUpsert,
     FileUploadConfirmation,
     FileUploadConfirmationResponse,
     FileUploadResponse,
+    LabParameterTrendResponse,
+    LabTrendHistoryItem,
+    LabTrendPoint,
     PresignedUploadRequest,
     PresignedUploadResponse,
     RecordCreateBatch,
@@ -47,11 +54,14 @@ def _scoped_records_query(
 @router.get("/records", response_model=RecordListResponse)
 async def list_records(
     record_type: Optional[str] = None,
+    document_subtype: Optional[str] = None,
+    provider_name: Optional[str] = None,
+    tag: Optional[str] = None,
     q: Optional[str] = Query(default=None, min_length=1, max_length=120),
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     has_file: Optional[bool] = None,
-    sort_by: Literal["record_date", "title", "file_uploaded_at"] = "record_date",
+    sort_by: Literal["record_date", "title", "file_uploaded_at", "provider_name"] = "record_date",
     sort_order: Literal["asc", "desc"] = "desc",
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
@@ -69,12 +79,22 @@ async def list_records(
 
     if record_type:
         query = query.filter(HealthRecord.record_type == record_type)
+    if document_subtype:
+        query = query.filter(HealthRecord.document_subtype == document_subtype)
+    if provider_name:
+        query = query.filter(HealthRecord.provider_name.ilike(f"%{provider_name.strip()}%"))
+    if tag:
+        query = query.filter(
+            HealthRecord.tags.is_not(None),
+            cast(HealthRecord.tags, String).ilike(f"%{tag.strip()}%"),
+        )
     if q:
         pattern = f"%{q.strip()}%"
         query = query.filter(
             or_(
                 HealthRecord.title.ilike(pattern),
                 HealthRecord.notes.ilike(pattern),
+                HealthRecord.provider_name.ilike(pattern),
             )
         )
     if start_date:
@@ -90,6 +110,7 @@ async def list_records(
         "record_date": HealthRecord.record_date,
         "title": HealthRecord.title,
         "file_uploaded_at": HealthRecord.file_uploaded_at,
+        "provider_name": HealthRecord.provider_name,
     }
     sort_column = sort_column_map[sort_by]
     sort_expression = asc(sort_column) if sort_order == "asc" else desc(sort_column)
@@ -110,6 +131,131 @@ async def list_records(
     )
 
 
+@router.get("/connected-services", response_model=list[ConnectedServiceResponse])
+async def list_connected_services(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[ConnectedServiceResponse]:
+    services = (
+        db.query(ConnectedService)
+        .filter(ConnectedService.user_id == user.id)
+        .order_by(ConnectedService.updated_at.desc(), ConnectedService.provider_name.asc())
+        .all()
+    )
+    if not services:
+        derived = (
+            db.query(
+                HealthRecord.provider_name,
+                func.count(HealthRecord.id),
+            )
+            .filter(
+                HealthRecord.user_id == user.id,
+                HealthRecord.provider_name.is_not(None),
+            )
+            .group_by(HealthRecord.provider_name)
+            .all()
+        )
+        return [
+            ConnectedServiceResponse(
+                id=index + 1,
+                provider_name=name or "Unknown Provider",
+                provider_type="hospital",
+                status="active",
+                record_count=count,
+                synced_at=None,
+            )
+            for index, (name, count) in enumerate(derived)
+        ]
+    return [ConnectedServiceResponse.model_validate(item) for item in services]
+
+
+@router.put("/connected-services", response_model=ConnectedServiceResponse)
+async def upsert_connected_service(
+    payload: ConnectedServiceUpsert,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ConnectedServiceResponse:
+    service = (
+        db.query(ConnectedService)
+        .filter(
+            ConnectedService.user_id == user.id,
+            ConnectedService.provider_name == payload.provider_name,
+        )
+        .first()
+    )
+    if service is None:
+        service = ConnectedService(
+            user_id=user.id,
+            provider_name=payload.provider_name,
+            provider_type=payload.provider_type,
+            status=payload.status,
+            record_count=0,
+            synced_at=datetime.now(timezone.utc) if payload.status == "active" else None,
+        )
+        db.add(service)
+    else:
+        service.provider_type = payload.provider_type
+        service.status = payload.status
+        if payload.status == "active":
+            service.synced_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(service)
+    return ConnectedServiceResponse.model_validate(service)
+
+
+@router.get("/lab-parameters/trends", response_model=LabParameterTrendResponse)
+async def lab_parameter_trends(
+    parameter_key: str = Query(..., min_length=1, max_length=64),
+    user: User = Depends(get_current_user),
+    profile_scope: ProfileScope = Depends(get_profile_scope),
+    db: Session = Depends(get_db),
+) -> LabParameterTrendResponse:
+    results = (
+        db.query(LabParameterResult)
+        .filter(
+            LabParameterResult.user_id == user.id,
+            LabParameterResult.parameter_key == parameter_key,
+            LabParameterResult.family_member_id.is_(None)
+            if profile_scope.family_member_id is None
+            else LabParameterResult.family_member_id == profile_scope.family_member_id,
+        )
+        .order_by(LabParameterResult.observed_on.asc())
+        .all()
+    )
+    if not results:
+        label = parameter_key.replace("_", " ").title()
+        return LabParameterTrendResponse(
+            parameter_key=parameter_key,
+            parameter_label=label,
+            unit="",
+            latest_value=None,
+            status=None,
+            data_points=[],
+            history=[],
+        )
+
+    latest = results[-1]
+    return LabParameterTrendResponse(
+        parameter_key=parameter_key,
+        parameter_label=latest.parameter_label,
+        unit=latest.unit,
+        latest_value=latest.value,
+        status=latest.status,
+        data_points=[
+            LabTrendPoint(observed_on=item.observed_on, value=item.value)
+            for item in results
+        ],
+        history=[
+            LabTrendHistoryItem(
+                observed_on=item.observed_on,
+                value=item.value,
+                unit=item.unit,
+            )
+            for item in reversed(results)
+        ],
+    )
+
+
 @router.post(
     "/records",
     response_model=UploadRecordsResponse,
@@ -127,8 +273,11 @@ async def create_records(
             user_id=user.id,
             family_member_id=profile_scope.family_member_id,
             record_type=item.record_type,
+            document_subtype=item.document_subtype,
             record_date=item.record_date,
             title=item.title,
+            provider_name=item.provider_name,
+            tags=item.tags,
             notes=item.notes,
         )
         for item in body.records

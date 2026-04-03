@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, String, Text, Uuid
+from sqlalchemy import JSON, Date, DateTime, ForeignKey, Integer, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -29,9 +29,12 @@ class HealthRecord(Base):
         index=True,
     )
     record_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    document_subtype: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
     record_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
+    provider_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    tags: Mapped[Optional[list[str]]] = mapped_column(JSON, nullable=True)
     file_name: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     file_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
     file_size: Mapped[Optional[int]] = mapped_column(nullable=True)
