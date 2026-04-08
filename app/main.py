@@ -28,7 +28,11 @@ from app.api.v1.vault import router as vault_router
 from app.api.v1.family import router as family_router
 
 # ── Bootstrap DB — runs after all models are registered ───────────────────
-Base.metadata.create_all(bind=engine)
+try:
+    Base.metadata.create_all(bind=engine)
+    print("[DB] create_all completed successfully")
+except Exception as _db_err:
+    print(f"[DB] create_all failed: {_db_err}")
 
 
 # ── Lifespan ─────────────────────────────────────────────
