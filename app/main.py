@@ -12,8 +12,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.firebase import initialize_firebase
+from app.core.database import engine, Base
 
-# ── Import routers ───────────────────────────────────────
+# ── Import routers (also registers ORM models with Base.metadata) ─────────
 from app.api.v1.auth import router as auth_router
 from app.api.v1.vitals import router as vitals_router
 from app.api.v1.symptoms import router as symptoms_router
@@ -26,22 +27,18 @@ from app.api.v1.exercise import router as exercise_router
 from app.api.v1.vault import router as vault_router
 from app.api.v1.family import router as family_router
 
+# ── Bootstrap DB — runs after all models are registered ───────────────────
+Base.metadata.create_all(bind=engine)
+
 
 # ── Lifespan ─────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Application startup and shutdown events.
-
-    Startup:
-        1. Initialize Firebase Admin SDK.
-        2. Validate app startup dependencies.
-    """
-    # Startup
+    """Application startup and shutdown events."""
     initialize_firebase()
-    print(f"✅ App started. Expecting migrated DB at: {settings.DATABASE_URL}")
+    print(f"✅ App started. DB: {settings.DATABASE_URL}")
     yield
-    # Shutdown (nothing to clean up for now)
 
 
 # ── App ──────────────────────────────────────────────────
@@ -95,4 +92,13 @@ app.include_router(vault_router)
 @app.get("/", tags=["Health"])
 async def root() -> dict:
     """Root health check endpoint."""
-    return {"status": "healthy", "service": settings.PROJECT_NAME}
+    return {"status": "healthy", "service": settings.PROJECT_NAME, "v": "2"}
+
+
+@app.get("/debug/db", tags=["Health"])
+async def debug_db() -> dict:
+    """Debug endpoint: returns DB URL and table list."""
+    from sqlalchemy import inspect as sa_inspect, text
+    from app.core.database import engine
+    tables = sa_inspect(engine).get_table_names()
+    return {"database_url": settings.DATABASE_URL, "tables": tables}
