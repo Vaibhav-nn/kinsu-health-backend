@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from firebase_admin import auth as firebase_auth
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.models.family import FamilyMember
 from app.models.user import User
@@ -21,7 +22,9 @@ from app.api.user_sync import upsert_user_from_decoded_token
 
 
 async def verify_firebase_token(
-    authorization: str = Header(..., description="Bearer <Firebase ID Token>"),
+    authorization: Optional[str] = Header(
+        default=None, description="Bearer <Firebase ID Token>"
+    ),
 ) -> dict:
     """Validate the Firebase ID token from the Authorization header.
 
@@ -34,7 +37,15 @@ async def verify_firebase_token(
     Raises:
         HTTPException 401: If the token is missing, malformed, or invalid.
     """
-    if not authorization.startswith("Bearer "):
+    if settings.AUTH_BYPASS:
+        return {
+            "uid": settings.AUTH_BYPASS_UID,
+            "email": settings.AUTH_BYPASS_EMAIL,
+            "name": settings.AUTH_BYPASS_NAME,
+            "firebase": {"sign_in_provider": "demo_bypass"},
+        }
+
+    if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authorization header must be 'Bearer <token>'.",

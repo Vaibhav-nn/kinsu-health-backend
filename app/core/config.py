@@ -16,6 +16,10 @@ class Settings(BaseSettings):
 
     # ── Firebase ──────────────────────────────────────────
     FIREBASE_CREDENTIALS_PATH: str = "./firebase-service-account.json"
+    AUTH_BYPASS: bool = False
+    AUTH_BYPASS_UID: str = "demo-local-user"
+    AUTH_BYPASS_EMAIL: str = "demo@kinsu.local"
+    AUTH_BYPASS_NAME: str = "Kinsu Demo"
 
     # ── CORS ──────────────────────────────────────────────
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:8080"
